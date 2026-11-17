@@ -40,6 +40,7 @@ export interface CofactoryRouteDeps {
   discovery: () => Discovery;
   dossiers: () => Dossiers;
   validation: () => { sprints: Sprints; rails: Rails };
+  relatedParties?: { get(): { emails: string[]; domains: string[] }; set(value: { emails: string[]; domains: string[] }): void };
   traceDeps: () => TraceDeps;
   tick: () => Promise<void>;
   owner: (auth: RequestAuth) => boolean;
@@ -198,6 +199,13 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
       record(companyId, "rails", Object.keys(input).filter((key) => input[key as keyof typeof input] !== undefined).join(", "));
       return json(res, 200, { ok: true, rails: rails.summary(companyId) });
     }
+    if (path === "/api/cofactory/related-parties" && deps.relatedParties) {
+      const input = parse(z.object({ emails: z.array(z.string().email()).max(100).default([]), domains: z.array(z.string().regex(/^[a-z0-9.-]+\.[a-z]{2,}$/i)).max(100).default([]) }));
+      if (!input) return;
+      deps.relatedParties.set({ emails: input.emails.map((email) => email.toLowerCase()), domains: input.domains.map((domain) => domain.toLowerCase()) });
+      record(null, "related_parties", `${input.emails.length} emails, ${input.domains.length} domains`);
+      return json(res, 200, { ok: true });
+    }
     if (path === "/api/cofactory/discovery/abandon") {
       const result = deps.discovery().abandonBatch();
       record(null, "discovery_abandon", result.ok ? `abandoned short: ${result.status.short.join("; ")}` : result.reason);
@@ -241,9 +249,11 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
       }
     }
     if (path === "/api/cofactory/launch") {
-      const input = parse(z.object({ name: z.string().min(1).max(120), brief: z.string().min(1).max(4_000), capCents: cents, team: z.boolean().default(true) }));
+      const input = parse(z.object({ name: z.string().min(1).max(120), brief: z.string().max(4_000).default(""), capCents: cents, team: z.boolean().default(true), dossierId: z.string().optional() }));
       if (!input) return;
-      const launch = { name: input.name, brief: input.brief, capCents: input.capCents };
+      if (!input.dossierId && !input.brief.trim()) return json(res, 400, { error: "give a brief, or a dossierId to launch from" });
+      if (input.dossierId && !(input.team && runtime?.launcher)) return json(res, 400, { error: "launching from a dossier needs the runtime and a team" });
+      const launch = { name: input.name, brief: input.brief, capCents: input.capCents, ...(input.dossierId ? { dossierId: input.dossierId } : {}) };
       const result = input.team && runtime?.launcher ? await runtime.launcher.launch(launch, "owner") : book.launch(launch, "owner");
       const companyId = result.ok ? result.company.id : null;
       record(companyId, "launch", input.name, { kind: "company.launch", ok: result.ok, reason: result.ok ? `${input.name} with a ${input.capCents}-cent cap` : result.reason, evidence: companyId ? [{ type: "company", id: companyId }] : [] });

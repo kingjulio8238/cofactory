@@ -188,7 +188,7 @@ export function createSessions(deps: SessionDeps) {
         objective: input.objective, doneWhen: input.doneWhen,
         budgetMs: input.kind === "deep" ? policy.deepBudgetMs : policy.operatingBudgetMs, budgetCents: input.kind === "deep" ? policy.deepBudgetCents : policy.sessionBudgetCents,
       });
-      await runRound(session, envelope(session, input.context));
+      void track(runRound(session, envelope(session, input.context)));
       return { session: store.session(session.id)!, started: true };
     },
 

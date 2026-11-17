@@ -78,9 +78,21 @@ describe("cofactory validation on a real dusk server", () => {
     const passed = await until("the sprint to pass", async () => {
       const state = await call("GET", "/api/cofactory/state");
       const events = (await call("GET", `/api/cofactory/events?company=${companyId}`)).events as Array<{ kind: string; evidenceClass: string }>;
-      return events.some((event) => event.kind === "payment") && !(await call("GET", `/api/cofactory/sprints?company=${companyId}`)).sprints.length ? state : undefined;
+      const running = (await call("GET", `/api/cofactory/sprints?company=${companyId}`)).sprints as Array<{ sprint: { id: string } }>;
+      return events.some((event) => event.kind === "payment") && !running.some((item) => item.sprint.id === sprint.sprint.id) ? state : undefined;
     });
     expect(passed).toBeTruthy();
+    const booked = await until("the payment to be booked as revenue", async () => {
+      const entries = (await call("GET", `/api/cofactory/ledger?company=${companyId}`)).entries as Array<{ kind: string; receipt: string; cents: number }>;
+      return entries.find((entry) => entry.kind === "revenue" && entry.receipt === "pi_e2e");
+    });
+    expect(booked).toMatchObject({ cents: 9_900 });
+    await call("POST", "/api/cofactory/related-parties", { emails: ["owner@tenderwatch.test"], domains: [] });
+    const own = JSON.stringify({ type: "checkout.session.completed", livemode: true, created: Math.floor(Date.now() / 1000), data: { object: { id: "cs_own", payment_intent: "pi_own", payment_status: "paid", amount_total: 9_900, customer_details: { email: "owner@tenderwatch.test" } } } });
+    const t2 = Math.floor(Date.now() / 1000);
+    await fetch(`${hooks}/hooks/cofactory/stripe/${companyId}`, { method: "POST", body: own, headers: { "stripe-signature": `t=${t2},v1=${createHmac("sha256", "whsec_e2e").update(`${t2}.${own}`).digest("hex")}` } });
+    const refusedRevenue = await until("the owner's own payment to be refused as revenue", async () => ((await call("GET", `/api/cofactory/decisions?company=${companyId}`)).decisions as Array<{ kind: string; verdict: string; reason: string }>).find((decision) => decision.kind === "revenue.record" && decision.verdict === "refused"));
+    expect(refusedRevenue.reason).toContain("related party");
     const trace = (await call("GET", `/api/cofactory/trace/company/${companyId}`));
     expect(trace.untraceable).toEqual([]);
     expect(trace.timeline.some((item: { source: string; text: string }) => item.source === "world" && item.text.startsWith("payment via stripe (committed)"))).toBe(true);

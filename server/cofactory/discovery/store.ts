@@ -3,6 +3,24 @@ import { DatabaseSync } from "node:sqlite";
 import type { DiscoveryBatch, FactoryProfile, Niche, NicheStatus, Signal } from "../../../shared/cofactory/discovery.ts";
 import type { Dossier, DossierStatus } from "../../../shared/cofactory/dossier.ts";
 
+export const POSTMORTEM_CAUSES = ["no_buyer_voice", "no_reply", "price", "reach", "fulfilment", "legal", "competition", "economics", "other"] as const;
+
+/** What a killed company disproved, kept so the scout's ranking learns from it. */
+export interface Postmortem {
+  id: string;
+  companyId: string;
+  nicheId: string | null;
+  at: number;
+  buyer: string;
+  job: string;
+  cause: (typeof POSTMORTEM_CAUSES)[number];
+  /** The assumption the evidence disproved, in one sentence. */
+  falsified: string;
+  lesson: string;
+  /** Event, claim check or signal ids the post-mortem rests on. */
+  evidence: string[];
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS profile (id INTEGER PRIMARY KEY CHECK (id = 1), json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS batches (id TEXT PRIMARY KEY, factory_id TEXT NOT NULL, started_at INTEGER NOT NULL, closed_at INTEGER, target INTEGER NOT NULL, note TEXT NOT NULL);
@@ -20,6 +38,12 @@ CREATE TABLE IF NOT EXISTS dossiers (
   id TEXT PRIMARY KEY, niche_id TEXT NOT NULL, factory_id TEXT NOT NULL, version INTEGER NOT NULL, at INTEGER NOT NULL, body TEXT NOT NULL,
   verification TEXT NOT NULL, qa TEXT NOT NULL, score TEXT, status TEXT NOT NULL, champion TEXT, UNIQUE (niche_id, version)
 );
+CREATE TABLE IF NOT EXISTS company_links (company_id TEXT PRIMARY KEY, niche_id TEXT NOT NULL, dossier_id TEXT);
+CREATE TABLE IF NOT EXISTS postmortems (
+  id TEXT PRIMARY KEY, company_id TEXT NOT NULL, niche_id TEXT, at INTEGER NOT NULL, buyer TEXT NOT NULL, job TEXT NOT NULL,
+  cause TEXT NOT NULL, falsified TEXT NOT NULL, lesson TEXT NOT NULL, evidence TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS postmortems_no_update BEFORE UPDATE ON postmortems BEGIN SELECT RAISE(ABORT, 'post-mortems are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS signals_no_update BEFORE UPDATE ON signals BEGIN SELECT RAISE(ABORT, 'signals are append-only'); END;
 `;
 
@@ -126,6 +150,25 @@ export function openDiscoveryStore(file: string) {
     },
     dossiersOf(nicheId: string): Dossier[] {
       return (db.prepare("SELECT * FROM dossiers WHERE niche_id = ? ORDER BY version").all(nicheId) as Array<Record<string, unknown>>).map(toDossier);
+    },
+
+    linkCompany(companyId: string, nicheId: string, dossierId: string | null): void {
+      db.prepare("INSERT INTO company_links (company_id, niche_id, dossier_id) VALUES (?, ?, ?) ON CONFLICT(company_id) DO UPDATE SET niche_id = excluded.niche_id, dossier_id = excluded.dossier_id").run(companyId, nicheId, dossierId);
+    },
+    linkOf(companyId: string): { nicheId: string; dossierId: string | null } | null {
+      const row = db.prepare("SELECT niche_id, dossier_id FROM company_links WHERE company_id = ?").get(companyId) as { niche_id: string; dossier_id: string | null } | undefined;
+      return row ? { nicheId: row.niche_id, dossierId: row.dossier_id } : null;
+    },
+
+    addPostmortem(entry: Postmortem): void {
+      db.prepare("INSERT INTO postmortems (id, company_id, niche_id, at, buyer, job, cause, falsified, lesson, evidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(entry.id, entry.companyId, entry.nicheId, entry.at, entry.buyer, entry.job, entry.cause, entry.falsified, entry.lesson, JSON.stringify(entry.evidence));
+    },
+    postmortems(): Postmortem[] {
+      return (db.prepare("SELECT * FROM postmortems ORDER BY at").all() as Array<Record<string, unknown>>).map((row) => ({
+        id: String(row.id), companyId: String(row.company_id), nicheId: row.niche_id === null ? null : String(row.niche_id), at: Number(row.at), buyer: String(row.buyer),
+        job: String(row.job), cause: row.cause as Postmortem["cause"], falsified: String(row.falsified), lesson: String(row.lesson), evidence: JSON.parse(String(row.evidence)) as string[],
+      }));
     },
 
     close(): void {

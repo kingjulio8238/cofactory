@@ -31,7 +31,8 @@ export function createDossiers(deps: DossierDeps) {
   function select(batchId: string): string[] {
     const candidates = store.niches({ batchId }).filter((niche) => niche.status === "candidate");
     if (store.niches({ batchId }).some((niche) => niche.status !== "candidate" && niche.status !== "rejected")) return [];
-    const ranked = candidates.map((niche) => ({ niche, rank: preScore(niche, niche.signalIds.map((id) => store.signal(id)).filter((signal) => signal !== null)) }))
+    const killed = store.postmortems();
+    const ranked = candidates.map((niche) => ({ niche, rank: preScore(niche, niche.signalIds.map((id) => store.signal(id)).filter((signal) => signal !== null), killed) }))
       .sort((a, b) => b.rank - a.rank).slice(0, policy.dossiersPerBatch);
     for (const { niche } of ranked) store.setNicheStatus(niche.id, "selected");
     return ranked.map(({ niche }) => niche.id);

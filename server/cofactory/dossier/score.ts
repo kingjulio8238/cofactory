@@ -1,4 +1,5 @@
 import { BUYER_VOICE_SOURCES, type Niche } from "../../../shared/cofactory/discovery.ts";
+import { nicheSimilarity } from "../discovery/similarity.ts";
 import type { DossierBody, DossierPolicy, QaReport, ScoreReport, VerificationReport, Veto } from "../../../shared/cofactory/dossier.ts";
 
 /** A price as cents per month; null when it cannot be put on a monthly basis (an hourly rate with no hours). */
@@ -65,9 +66,13 @@ export function scoreDossier(input: {
   return { score, features, vetoes };
 }
 
-/** Which closed-batch candidates earn a dossier: the ones whose own evidence is strongest, before any dossier exists. */
-export function preScore(niche: Niche, signals: Array<{ sourceType: string; site: string }>): number {
+/**
+ * Which closed-batch candidates earn a dossier: the ones whose own evidence is strongest, before any dossier exists,
+ * less a penalty for each killed company whose niche it resembles, so a disproved idea is not re-tried in new words.
+ */
+export function preScore(niche: Niche, signals: Array<{ sourceType: string; site: string }>, killed: ReadonlyArray<{ buyer: string; job: string }> = []): number {
   const voice = signals.filter((signal) => (BUYER_VOICE_SOURCES as readonly string[]).includes(signal.sourceType)).length;
   const sites = new Set(signals.map((signal) => signal.site)).size;
-  return voice * 2 + sites + (niche.boring ? 1 : 0) + niche.uniqueInputIds.length - niche.density * 2;
+  const history = killed.reduce((penalty, dead) => penalty + Math.max(0, nicheSimilarity(niche, { ...dead, channel: "" }) - 0.3) * 10, 0);
+  return voice * 2 + sites + (niche.boring ? 1 : 0) + niche.uniqueInputIds.length - niche.density * 2 - history;
 }

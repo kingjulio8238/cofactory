@@ -13,7 +13,9 @@ import {
   type Role,
 } from "../../shared/cofactory/types.ts";
 import type { Book } from "./book.ts";
+import { randomUUID } from "node:crypto";
 import { verifyEvidence } from "./truth/gate.ts";
+import { POSTMORTEM_CAUSES } from "./discovery/store.ts";
 import type { Truth } from "./truth/store.ts";
 import type { Launcher } from "./runtime/launcher.ts";
 import type { Sessions } from "./runtime/sessions.ts";
@@ -444,6 +446,24 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     },
   }),
   spec({
+    name: "cofactory_postmortem",
+    description: "Write the post-mortem of a killed company: the cause, the one assumption the evidence disproved, the lesson for picking the next niche, and the ids of the events, claim checks or signals it rests on. Future niche selection is penalised for resembling it.",
+    roles: ["lead"],
+    input: z.object({ company_id: z.string().min(1), cause: z.enum(POSTMORTEM_CAUSES), falsified: z.string().min(20).max(1_000), lesson: z.string().min(20).max(1_000), evidence: z.array(z.string()).min(1).max(20) }),
+    run(args, ctx) {
+      const store = ctx.discovery?.store;
+      if (!store) return refused("discovery is not running");
+      const company = ctx.book.company(args.company_id);
+      if (!company || company.status !== "killed") return refused("only a killed company gets a post-mortem");
+      if (store.postmortems().some((entry) => entry.companyId === args.company_id)) return refused("this company already has its post-mortem");
+      const link = store.linkOf(args.company_id);
+      const niche = link ? store.niche(link.nicheId) : null;
+      const entry = { id: randomUUID(), companyId: args.company_id, nicheId: niche?.id ?? null, at: (ctx.now ?? Date.now)(), buyer: niche?.buyer ?? company.name, job: niche?.job ?? company.brief.slice(0, 200), cause: args.cause, falsified: args.falsified, lesson: args.lesson, evidence: args.evidence };
+      store.addPostmortem(entry);
+      return ok({ postmortem: entry });
+    },
+  }),
+  spec({
     name: "cofactory_send",
     description: "Send a typed message to another seat. Specialists address their CEO, a CEO addresses its own team or the factory lead, the lead and scout address any company's CEO or each other, and only the lead escalates to the owner. The brief must stand alone.",
     roles: ALL,
@@ -481,12 +501,14 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
   }),
   spec({
     name: "cofactory_launch_company",
-    description: "Launch a company from a scored idea with a hard cap taken from unallocated money: its books, its workspace and brief, and a seated team (CEO, builder, marketer). Refused below the minimum stake, past the live-company limit, or beyond unallocated money.",
+    description: "Launch a company with a hard cap taken from unallocated money: its books, its workspace and brief, and a seated team (CEO, builder, marketer). Give dossier_id to launch from a shortlisted or championed dossier: its brief, buyers and offer carry over and the niche is claimed for good. Refused below the minimum stake, past the live-company limit, or beyond unallocated money.",
     roles: ["lead"],
-    input: z.object({ name: z.string().min(1).max(120), brief: z.string().min(1).max(4_000), cap_cents: cents }),
+    input: z.object({ name: z.string().min(1).max(120), brief: z.string().max(4_000).default(""), cap_cents: cents, dossier_id: z.string().optional() }),
     async run(args, ctx) {
       const { book, actor, launcher } = ctx;
-      const input = { name: args.name, brief: args.brief, capCents: args.cap_cents };
+      if (!args.dossier_id && !args.brief.trim()) return refused("give a brief, or a dossier_id to launch from");
+      const input = { name: args.name, brief: args.brief, capCents: args.cap_cents, ...(args.dossier_id ? { dossierId: args.dossier_id } : {}) };
+      if (input.dossierId && !launcher) return refused("launching from a dossier needs the runtime");
       const result = launcher ? await launcher.launch(input, actor) : book.launch(input, actor);
       if (!result.ok) { decide(ctx, "company.launch", "refused", `${args.name} with ${args.cap_cents} cents: ${result.reason}`, [], null); return refused(result.reason); }
       decide(ctx, "company.launch", "allowed", `${args.name} with a ${args.cap_cents}-cent cap`, [{ type: "company", id: result.company.id }], result.company.id);

@@ -15,6 +15,7 @@ import { openTruth, type Truth } from "./truth/store.ts";
 import { createObserver, type Observer } from "./observe/observer.ts";
 import { openObserveStore } from "./observe/store.ts";
 import type { TraceDeps } from "./observe/trace.ts";
+import type { EvidenceLink } from "../../shared/cofactory/observe.ts";
 import { createDiscovery, type Discovery } from "./discovery/discovery.ts";
 import { openLocalRegistry } from "./discovery/registry.ts";
 import { openDiscoveryStore } from "./discovery/store.ts";
@@ -27,6 +28,8 @@ import { duskMailPort } from "./validation/mail-dusk.ts";
 import { createOutreach, type MailPort, type Outreach } from "./validation/outreach.ts";
 import { openRails, type Rails } from "./validation/rails.ts";
 import { openSprints, type Sprints } from "./validation/sprints.ts";
+import { armsLength } from "./truth/classify.ts";
+import { writeFileAtomic } from "../atomic.ts";
 
 export const COFACTORY_INTERNAL_MCP_PATH = "/api/internal/cofactory/mcp";
 
@@ -82,9 +85,11 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
   const evidence = (): Truth => (truth ??= openTruth(join(deps.dataDir, "cofactory-evidence")));
   const seatOf = (botId: string): Membership | null => books().membership(botId);
   const observe = (): Observer => (observer ??= createObserver({ store: openObserveStore(join(deps.dataDir, "cofactory-observe.db")), book: books() }));
+  let registry: ReturnType<typeof openLocalRegistry> | null = null;
+  const registryOf = () => (registry ??= openLocalRegistry(join(deps.dataDir, "cofactory-registry.db")));
   const discoveryService = (): Discovery => {
     if (discovery) return discovery;
-    const registry = openLocalRegistry(join(deps.dataDir, "cofactory-registry.db"));
+    const registry = registryOf();
     registryClose = () => registry.close();
     discovery = createDiscovery({ store: openDiscoveryStore(join(deps.dataDir, "cofactory-discovery.db")), truth: evidence(), registry });
     const perBatch = process.env.COFACTORY_DOSSIERS_PER_BATCH;
@@ -118,6 +123,48 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     thanksUrl: (companyId) => { const offer = validationParts().rails.peek(companyId)?.offerUrl; return offer ? `${offer}#thanks` : null; },
     offerPage: (companyId) => (/^[\w-]+$/.test(companyId) && existsSync(offerFile(companyId)) ? readFileSync(offerFile(companyId), "utf8") : null),
   });
+
+  const relatedFile = join(deps.dataDir, "cofactory-related.json");
+  /** The owner's own addresses and domains, and those of anyone related: payments from them never count as customers. */
+  const relatedParties = (): { emails: string[]; domains: string[] } => {
+    try { return JSON.parse(readFileSync(relatedFile, "utf8")) as { emails: string[]; domains: string[] }; } catch { return { emails: [], domains: [] }; }
+  };
+
+  /**
+   * Books each arm's-length payment as revenue, once, and each refund of a booked payment as a refund. A payment that
+   * does not count (test mode, the owner's own card, under half the list price) is filed as a refused decision, once.
+   */
+  function bookRevenue(): void {
+    const book = books(), truth = evidence(), parts = validationParts(), seen = parts.sprints.cursor;
+    const related = relatedParties();
+    const refunded = truth.refunded();
+    for (const company of book.companies()) {
+      const entries = book.entries({ companyId: company.id });
+      const booked = new Set(entries.filter((entry) => entry.kind === "revenue").map((entry) => entry.receipt));
+      const link = discoveryService().store.linkOf(company.id);
+      const listPrice = link?.dossierId ? discoveryService().store.dossier(link.dossierId)?.body.offer.priceCents ?? null : null;
+      for (const event of truth.events({ companyId: company.id })) {
+        if (event.kind !== "payment" && event.kind !== "deposit") continue;
+        if (booked.has(event.externalId)) {
+          if (refunded.has(event.externalId) && !seen.get(`refund_booked:${event.id}`)) {
+            book.recordRefund({ companyId: company.id, cents: event.amountCents ?? 0, receipt: `refund:${event.externalId}` }, "intake");
+            seen.set(`refund_booked:${event.id}`, 1);
+          }
+          continue;
+        }
+        if (seen.get(`revenue_judged:${event.id}`)) continue;
+        const verdict = armsLength(event, { listPriceCents: listPrice ?? event.amountCents ?? 0, relatedEmails: related.emails, relatedDomains: related.domains, refunded });
+        const cited: EvidenceLink[] = [{ type: "external_event", id: event.id, externalId: event.externalId, evidenceClass: event.evidenceClass }];
+        if (verdict.ok && (event.amountCents ?? 0) > 0) {
+          const entry = book.recordRevenue({ companyId: company.id, cents: event.amountCents!, receipt: event.externalId }, "intake");
+          observe().decide({ companyId: company.id, session: null, actor: "intake", kind: "revenue.record", verdict: "allowed", reason: `${event.amountCents} cents from ${event.payerEmail}${listPrice === null ? " (no list price on record)" : ""}`, evidence: [...cited, { type: "ledger_entry", id: entry.id }] });
+        } else {
+          observe().decide({ companyId: company.id, session: null, actor: "intake", kind: "revenue.record", verdict: "refused", reason: verdict.reasons.join("; ") || "zero amount", evidence: cited });
+        }
+        seen.set(`revenue_judged:${event.id}`, 1);
+      }
+    }
+  }
 
   /** Reads each running sprint's mailbox and settles the sprint on its evidence; a failed sprint raises an alarm. */
   async function sprintUpkeep(store: RuntimeStore): Promise<void> {
@@ -157,7 +204,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     };
     const sessions = createSessions({ store, book: books(), workspaces, turns: port, policy, log });
     const scheduler = createScheduler({ book: books(), truth: evidence(), store, sessions, discovery: discoveryService(), dossiers: dossierService() });
-    const launcher = deps.createBot ? createLauncher({ book: books(), workspaces, createBot: deps.createBot }) : undefined;
+    const launcher = deps.createBot ? createLauncher({ book: books(), workspaces, createBot: deps.createBot, discovery: { store: discoveryService().store, registry: registryOf() } }) : undefined;
     runtime = { store, sessions, scheduler, launcher, policy };
     return runtime;
   }
@@ -172,6 +219,12 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       await parts.sessions.sweep();
       for (const alarm of checkAlarms({ book: books(), truth: evidence(), store: parts.store, policy: parts.policy })) log(`cofactory: alarm ${alarm.kind}: ${alarm.detail}`);
       await sprintUpkeep(parts.store);
+      bookRevenue();
+      const postmortems = new Set(discoveryService().store.postmortems().map((entry) => entry.companyId));
+      for (const company of books().companies()) {
+        if (company.status === "killed" && !postmortems.has(company.id)) parts.store.raise(company.id, "postmortem_missing", "a killed company needs its post-mortem (cofactory_postmortem)");
+        else parts.store.resolve(company.id, "postmortem_missing");
+      }
       await parts.scheduler.tick();
     } catch (error) {
       log(`cofactory: runtime tick failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
@@ -189,6 +242,11 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     dossiers: dossierService,
     validation: validationParts,
     intakeDoor,
+    relatedParties,
+    setRelatedParties(value: { emails: string[]; domains: string[] }): void {
+      writeFileAtomic(relatedFile, JSON.stringify(value), { mode: 0o600 });
+    },
+    bookRevenue,
     /** Whether a bot holds a Cofactory seat: a company seat sends mail only through the outreach gate. */
     seated: (botId: string) => seatOf(botId) !== null,
     traceDeps,

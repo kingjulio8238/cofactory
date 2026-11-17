@@ -1,6 +1,9 @@
 import type { Company, CompanyRole, FactoryRole } from "../../../shared/cofactory/types.ts";
 import type { Book, Result } from "../book.ts";
 import type { Workspaces } from "./workspace.ts";
+import type { DiscoveryStore } from "../discovery/store.ts";
+import type { NicheRegistry } from "../discovery/registry.ts";
+import type { Dossier } from "../../../shared/cofactory/dossier.ts";
 
 export interface PlaybookSeat {
   role: CompanyRole;
@@ -77,6 +80,24 @@ export interface LauncherDeps {
   workspaces: Workspaces;
   /** Creates a dusk bot that acts on its own (Full access) and returns its id. */
   createBot(profile: { name: string; instructions: string; section: string }): Promise<string>;
+  /** Where shortlisted niches and their dossiers live, so a company can be launched from one. */
+  discovery?: { store: DiscoveryStore; registry: NicheRegistry };
+}
+
+/** The brief a company launched from a dossier starts from: everything its first sessions need, in one place. */
+export function briefFromDossier(niche: { buyer: string; job: string; channel: string }, dossier: Dossier): string {
+  const body = dossier.body;
+  const dollars = (cents: number) => `$${(cents / 100).toLocaleString("en-US")}`;
+  return [
+    `Buyer: ${niche.buyer}. Job: ${niche.job}. Channel: ${niche.channel}.`,
+    `Offer: ${body.offer.archetype.split("_").join(" ")} at ${dollars(body.offer.priceCents)} per ${body.offer.per}, against ${dollars(body.offer.humanAlternative.amountCents)} per ${body.offer.humanAlternative.per} for the human alternative (${body.offer.humanAlternative.url}).`,
+    `Why the gap exists: ${body.gap.why}`,
+    `First ten customers: ${body.firstTen.channel}: ${body.firstTen.steps}`,
+    `Named buyers to start with: ${body.buyers.map((buyer) => `${buyer.name} (${buyer.contactUrl})`).join("; ")}.`,
+    `What would make it fail: ${body.failureModes.join("; ")}.`,
+    `Rules and risks: ${body.risks.notes}`,
+    `Dossier ${dossier.id} v${dossier.version}, score ${dossier.score?.score ?? "-"}.`,
+  ].join("\n");
 }
 
 /** Launches a company from a playbook: the books, its workspace and brief, and a seated team. */
@@ -95,10 +116,26 @@ export function createLauncher(deps: LauncherDeps) {
       return staffed;
     },
 
-    async launch(input: { name: string; brief: string; capCents: number }, actor: string, playbook: Playbook = NICHE_PLAYBOOK): Promise<Result<{ company: Company; team: Array<{ role: CompanyRole; botId: string }> }>> {
-      const launched = deps.book.launch(input, actor);
+    async launch(input: { name: string; brief: string; capCents: number; dossierId?: string }, actor: string, playbook: Playbook = NICHE_PLAYBOOK): Promise<Result<{ company: Company; team: Array<{ role: CompanyRole; botId: string }> }>> {
+      let brief = input.brief;
+      let link: { nicheId: string; dossierId: string } | null = null;
+      if (input.dossierId) {
+        const store = deps.discovery?.store;
+        const dossier = store?.dossier(input.dossierId);
+        if (!store || !dossier) return { ok: false, reason: "no such dossier" };
+        if (dossier.status !== "shortlisted" && dossier.status !== "championed") return { ok: false, reason: `only a shortlisted or championed dossier launches a company (this one is ${dossier.status})` };
+        const niche = store.niche(dossier.nicheId)!;
+        brief = `${briefFromDossier(niche, dossier)}${input.brief.trim() ? `\n${input.brief.trim()}` : ""}`;
+        link = { nicheId: niche.id, dossierId: dossier.id };
+      }
+      const launched = deps.book.launch({ name: input.name, brief, capCents: input.capCents }, actor);
       if (!launched.ok) return launched;
       const { company } = launched;
+      if (link && deps.discovery) {
+        deps.discovery.store.linkCompany(company.id, link.nicheId, link.dossierId);
+        deps.discovery.store.setNicheStatus(link.nicheId, "claimed");
+        deps.discovery.registry.promote(link.nicheId);
+      }
       await deps.workspaces.ensure(company.id, fill(playbook.brief, company));
       const team: Array<{ role: CompanyRole; botId: string }> = [];
       for (const seat of playbook.seats) {

@@ -113,3 +113,38 @@ describe("cofactory dossiers", () => {
     expect(r.starts.at(-1)!.prompt).not.toContain(`niche_id ${first}`);
   });
 });
+
+describe("from dossier to company", () => {
+  it("launches a company from a shortlisted dossier, claims the niche, and refuses an unshortlisted one", async () => {
+    const r = await rig();
+    await r.call("cofactory_close_batch", {});
+    const passed = await r.call("cofactory_submit_dossier", { niche_id: r.strong, dossier: goodDossier() });
+    const dossierId = (passed.structuredContent as { status: string }) && r.store.dossiersOf(r.strong).at(-1)!.id;
+    const { createLauncher } = await import("../runtime/launcher.ts");
+    const { createWorkspaces } = await import("../runtime/workspace.ts");
+    const { openLocalRegistry } = await import("../discovery/registry.ts");
+    const dir = mkdtempSync(join(tmpdir(), "cofactory-launch-"));
+    const registry = openLocalRegistry(join(dir, "registry.db"));
+    cleanups.push(() => { registry.close(); rmSync(dir, { recursive: true, force: true }); });
+    r.book.deposit(10_000, "owner");
+    let bots = 0;
+    const launcher = createLauncher({ book: r.book, workspaces: createWorkspaces(join(dir, "ws"), { git: false }), createBot: async () => `bot-${++bots}`, discovery: { store: r.store, registry } });
+    const launched = await launcher.launch({ name: "Ohio DIR Recon", brief: "", capCents: 4_000, dossierId }, "lead:bot");
+    if (!launched.ok) throw new Error(launched.reason);
+    expect(launched.company.brief).toContain("Buyer: independent pharmacies in Ohio. Job: monthly DIR fee reconciliation report.");
+    expect(launched.company.brief).toContain("Named buyers to start with: Riverside Pharmacy 1");
+    expect(r.store.linkOf(launched.company.id)).toEqual({ nicheId: r.strong, dossierId });
+    expect(r.store.niche(r.strong)!.status).toBe("claimed");
+    const failedId = r.store.dossiersOf(r.strong)[0]!.id;
+    expect(await launcher.launch({ name: "Again", brief: "", capCents: 4_000, dossierId: failedId }, "lead:bot")).toMatchObject({ ok: false });
+  });
+
+  it("ranks a candidate lower when it resembles a niche a killed company disproved", async () => {
+    const { preScore } = await import("./score.ts");
+    const niche = { id: "n", factoryId: "f", batchId: null, at: 0, buyer: "independent pharmacies in Ohio", job: "monthly DIR fee reconciliation report", channel: "forum", whyGap: "", signalIds: [], uniqueInputIds: ["in-1"], boring: true, crossField: false, status: "candidate" as const, density: 0 };
+    const signals = [{ sourceType: "forum", site: "a" }, { sourceType: "job_board", site: "b" }, { sourceType: "regulator", site: "c" }];
+    const fresh = preScore(niche, signals);
+    expect(preScore(niche, signals, [{ buyer: "Ohio independent pharmacies", job: "DIR fee reconciliation reports each month" }])).toBeLessThan(fresh - 2);
+    expect(preScore(niche, signals, [{ buyer: "dental practices", job: "appointment reminders" }])).toBe(fresh);
+  });
+});
