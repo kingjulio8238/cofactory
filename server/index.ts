@@ -1488,6 +1488,8 @@ function postDesktopPrivateMessage(message: DesktopPrivateMessage): boolean {
     return false;
   }
 }
+/** The desktop owner capability Electron handed this server, for the dev server's own seeding child; none outside the desktop. */
+export const desktopOwnerToken = (): string | null => desktopMutationToken || null;
 function applyDesktopMutationTokenMessage(raw: unknown): boolean {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
   const message = raw as Record<string, unknown>;
