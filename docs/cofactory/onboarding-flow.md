@@ -30,14 +30,11 @@ The `territories` eval:
 | # | Screen | dusk beat it reuses | What it asks | Why only a person can answer | What it writes |
 |---|---|---|---|---|---|
 | 1 | **Meet Cofactory** | `welcome` | Nothing | Sets the promise | None |
-| 2 | **Account** | `account` | Sign in, or skip | Sync with the phone and the cloud; your email pre-fills your own addresses | dusk account |
-| 3 | **Where should your factory run?** | `place` and `checkout` | This Mac / dusk cloud / your own server | Where it runs is your machine or your bill | dusk place |
 | 4 | **Your AI** | `ConnectAi` / `AiStep` | Engine sign-in | The crew runs on your plan | dusk instances |
 | 5 | **Where are you based?** | (new) | Country, plus state or province where it matters | The companies are yours, so your rules for contacting people, payments and tax apply | `settings.country`, `region` |
 | 6 | **Your stake** | (new) | A monthly budget and a cap per company | Your money | Settings; the budget is deposited |
 | 7 | **Anything in mind?** | (new, skippable) | Look here first (up to 3) and never run | Optional: your earlier answer that the owner *may* point the factory somewhere | `settings.hunches`, `never`, which become seed niches and constraints |
 | 8 | **What needs your OK** | (new) | Defaults set, so usually one Continue | Your control over outward steps | Approvals and related parties |
-| 9 | **Approve from your phone** | `phone` | Pair the phone | Approvals reach you anywhere | dusk phone |
 | 10 | **Hear when it needs you** | the Notifications row of `permissions` | Allow notifications | Only you can grant it | macOS |
 | 11 | **Your factory is open** | `making` / "Almost there" | Nothing | The factory draws its territories, the Lead and Scout arrive, the first search starts, and the first 3 territories are shown | `POST /api/cofactory/factory/open` |
 
@@ -46,6 +43,10 @@ The toggles on screen 8, with defaults:
 - start a company: ask;
 - spend over $25: ask;
 - close a company: tell me afterwards, with the post-mortem.
+
+**Out until Cofactory has its own:** dusk's account step, its cloud and its phone step. Each runs on dusk's services,
+which show dusk's name: Google's sign-in reads "to continue to dusk.bot", the cloud checks out on dusk.bot, and the phone
+pairs with the dusk bot app. The factory runs on this computer meanwhile.
 
 **Dropped:**
 - What the owner knows (fields, skills, people, assets, languages, interests) and the prompt that imported it from

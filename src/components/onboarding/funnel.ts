@@ -43,6 +43,9 @@ export function funnelSteps(facts: FunnelFacts): FunnelStep[] {
     if (FACTORY_ONLY.includes(step)) return factory;
     if (step === "notify") return factory && facts.desktop && Boolean(facts.notify);
     if (factory && (step === "bring" || step === "permissions")) return false;
+    // dusk bot's own services (its account at dusk.bot, dusk cloud's checkout, the dusk bot phone app) would show dusk's
+    // name, so a Cofactory factory runs on this computer until Cofactory has its own
+    if (factory && (step === "account" || step === "place" || step === "checkout" || step === "making" || step === "phone")) return false;
     if (step === "welcome") return facts.hello !== false;
     if (step === "place") return facts.desktop;
     if (step === "account") return facts.account;

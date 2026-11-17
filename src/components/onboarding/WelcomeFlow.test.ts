@@ -713,11 +713,10 @@ describe("the Cofactory first run", () => {
     await show();
     expect(title()).toBe("Meet Cofactory");
     await press("Get started");
-    expect(title()).toBe("Where should your factory run?");
-    await choose("[data-funnel-place=mac]");
+    expect(step(), "no dusk account, dusk cloud or dusk phone app: those would show dusk's name").toBe("ai");
     await usesFoundAi();
     expect(step(), "nothing about what the owner knows: the factory finds its own niches").toBe("where");
-    expect(document.body.querySelector("[data-funnel-progress]")?.getAttribute("data-funnel-progress")).toBe("4/8");
+    expect(document.body.querySelector("[data-funnel-progress]")?.getAttribute("data-funnel-progress")).toBe("3/7");
     expect(button("Continue")?.disabled, "not until a country is chosen").toBe(true);
     const country = document.body.querySelector<HTMLSelectElement>("[data-where-country]")!;
     await act(async () => { country.value = "US"; country.dispatchEvent(new Event("change", { bubbles: true })); });
