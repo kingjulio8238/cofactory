@@ -33,6 +33,12 @@ export function stripeEventToInput(event: { type?: string; livemode?: boolean; c
       payerEmail: object.customer_details?.email ?? object.customer_email ?? null, amountCents: Number(object.amount_total ?? 0), testMode: event.livemode === false,
     };
   }
+  if (event.type === "invoice.paid" && Number(object.amount_paid ?? 0) > 0) {
+    return {
+      source: "stripe", externalId: String(object.payment_intent ?? object.id), companyId, kind: "payment", occurredAt,
+      payerEmail: object.customer_email ?? null, amountCents: Number(object.amount_paid), testMode: event.livemode === false,
+    };
+  }
   if (event.type === "charge.refunded") {
     return {
       source: "stripe", externalId: String(object.id), companyId, kind: "refund", occurredAt, refundOf: object.payment_intent ? String(object.payment_intent) : null,

@@ -46,6 +46,24 @@ export function createOutreach(deps: { sprints: Sprints; truth: Truth; mail: Mai
       }
     },
 
+    /**
+     * Mail to an existing customer about their order: no sprint caps, since they asked for the work, but never to a
+     * suppressed address and never to someone without an order.
+     */
+    async sendCustomer(companyId: string, input: { to: string; subject: string; text: string; isCustomer(address: string): boolean }): Promise<{ ok: true; messageId: string } | { ok: false; reason: string }> {
+      const mailbox = deps.mailboxFor(companyId);
+      if (!mailbox) return { ok: false, reason: "the company has no connected mailbox to send from; the owner connects one" };
+      const to = input.to.trim().toLowerCase();
+      if (!input.isCustomer(to)) return { ok: false, reason: "that address has no order with this company; prospects are reached through a sprint" };
+      if (sprints.suppressed(to)) return { ok: false, reason: "that address asked not to be contacted" };
+      try {
+        const sent = await mail.send(mailbox, { to, subject: input.subject, text: input.text, headers: {} });
+        return { ok: true, messageId: sent.messageId };
+      } catch (error) {
+        return { ok: false, reason: `the mailbox refused to send: ${error instanceof Error ? error.message : String(error)}` };
+      }
+    },
+
     /** Reads new mail for a company: replies become evidence, stops and bounces become permanent suppressions. */
     async poll(companyId: string): Promise<{ recorded: number; suppressed: number }> {
       const mailbox = deps.mailboxFor(companyId);

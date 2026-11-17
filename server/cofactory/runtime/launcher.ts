@@ -23,6 +23,8 @@ const RULES = `## Standing rules
 - Gates read the world: a stage moves only on evidence that checks out (a page that loads for a stranger, a recorded reply that reads urgent, a real payment).
 - Only arm's-length money counts: a settled payment from someone unrelated to the owner, Cofactory or another factory, at half the list price or more.
 - Sell before building. The first dollar comes from an offer page, a payment link and the work delivered by hand.
+- Validation runs as a one-week sprint (cofactory_start_sprint) over named buyers whose public page shows how to reach them; outreach goes only through cofactory_send_outreach, inside its caps, and a "stop" is final.
+- Every paid order is delivered by hand from this folder and recorded with cofactory_deliver_order. Write RUNBOOK.md as you serve it: the steps a stranger would follow to serve the next order. A stand-in will be asked to do exactly that from RUNBOOK.md, JOURNAL.md and this brief alone; the first dollar counts once they can.
 - Every claim made to a buyer needs a source. Check a claim with cofactory_check_claim before relying on it.
 - Spend real money only through cofactory_authorize_spend and cofactory_capture_spend.
 - Tactics change at the thresholds set in this brief; at most two identical retries, then try a new approach and write it in the journal.

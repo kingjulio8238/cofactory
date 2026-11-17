@@ -87,6 +87,9 @@ describe("cofactory validation on a real dusk server", () => {
       return entries.find((entry) => entry.kind === "revenue" && entry.receipt === "pi_e2e");
     });
     expect(booked).toMatchObject({ cents: 9_900 });
+    const orders = (await call("GET", `/api/cofactory/orders?company=${companyId}`)).companies[0];
+    expect(orders.orders).toMatchObject([{ status: "open", customer: "estimator@example-mechanical.test", amountCents: 9_900 }]);
+    expect(orders.firstDollar).toEqual({ paid: true, delivered: false, rehearsed: false, reached: false });
     await call("POST", "/api/cofactory/related-parties", { emails: ["owner@tenderwatch.test"], domains: [] });
     const own = JSON.stringify({ type: "checkout.session.completed", livemode: true, created: Math.floor(Date.now() / 1000), data: { object: { id: "cs_own", payment_intent: "pi_own", payment_status: "paid", amount_total: 9_900, customer_details: { email: "owner@tenderwatch.test" } } } });
     const t2 = Math.floor(Date.now() / 1000);

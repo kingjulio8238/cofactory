@@ -14,6 +14,7 @@ import {
 } from "../../shared/cofactory/types.ts";
 import type { Book } from "./book.ts";
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { verifyEvidence } from "./truth/gate.ts";
 import { POSTMORTEM_CAUSES } from "./discovery/store.ts";
 import type { Truth } from "./truth/store.ts";
@@ -25,7 +26,8 @@ import type { Dossiers } from "./dossier/dossiers.ts";
 import type { Outreach } from "./validation/outreach.ts";
 import type { Rails } from "./validation/rails.ts";
 import type { Sprints } from "./validation/sprints.ts";
-import { createPaymentLink, renderOfferPage } from "./validation/offer.ts";
+import { createInvoice, createPaymentLink, renderOfferPage } from "./validation/offer.ts";
+import { fileInside, runbookProblem, type Orders } from "./validation/orders.ts";
 import { OUTREACH_CHANNELS } from "../../shared/cofactory/validation.ts";
 import { SIGNAL_KINDS, SOURCE_TYPES } from "../../shared/cofactory/discovery.ts";
 import type { DecisionKind, EvidenceLink } from "../../shared/cofactory/observe.ts";
@@ -82,7 +84,7 @@ export interface ToolContext {
   observe?: Observer;
   discovery?: Discovery;
   dossiers?: Dossiers;
-  validation?: { sprints: Sprints; outreach: Outreach; rails: Rails; saveOffer(companyId: string, html: string): string };
+  validation?: { sprints: Sprints; outreach: Outreach; rails: Rails; orders: Orders; folderOf(companyId: string): string; saveOffer(companyId: string, html: string): string };
   /** The seat's running session, which decisions and tool calls are filed under. */
   session?: Session | null;
 }
@@ -446,6 +448,114 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     },
   }),
   spec({
+    name: "cofactory_orders",
+    description: "The company's paid orders (open, delivered, refunded), its stand-in rehearsals, and where it stands on the first-dollar gate: paid, delivered, and served again by a stand-in from the runbook alone.",
+    roles: COMPANY_ROLES,
+    input: z.object({}),
+    run(_args, ctx) {
+      if (!ctx.validation) return refused("validation is not running");
+      const { orders } = ctx.validation;
+      const companyId = ctx.seat.companyId!;
+      return ok({ orders: orders.list(companyId), rehearsals: orders.rehearsals(companyId), firstDollar: orders.firstDollar(companyId), folder: ctx.validation.folderOf(companyId) });
+    },
+  }),
+  spec({
+    name: "cofactory_deliver_order",
+    description: "Record that a paid order was delivered: a summary and the delivered file's path relative to the company folder. RUNBOOK.md in the company folder must already say, step by step, how to serve an order like this one, updated since the order came in. A stand-in passes rehearsal true and a path relative to its packet folder.",
+    roles: ["ceo", "builder", "seller", "operator"],
+    input: z.object({ order_id: z.string().min(1), summary: z.string().min(20).max(2_000), deliverable: z.string().min(1).max(500), rehearsal: z.boolean().default(false) }),
+    run(args, ctx) {
+      if (!ctx.validation) return refused("validation is not running");
+      const { orders, folderOf } = ctx.validation;
+      const companyId = ctx.seat.companyId!;
+      const order = orders.order(args.order_id);
+      if (!order || order.companyId !== companyId) return refused("no such order in this company");
+      const payment = ctx.truth.event(order.eventId);
+      const cited: EvidenceLink[] = payment ? [{ type: "external_event", id: payment.id, externalId: payment.externalId, evidenceClass: payment.evidenceClass }] : [{ type: "company", id: companyId }];
+      if (args.rehearsal) {
+        const rehearsal = orders.rehearsalOfBot(ctx.seat.botId);
+        if (!rehearsal || rehearsal.orderId !== order.id || rehearsal.status !== "pending") return refused("this seat has no rehearsal of that order to deliver");
+        const file = fileInside(rehearsal.dir, args.deliverable);
+        if (!file.ok) return refused(file.reason);
+        orders.rehearsalDelivered(rehearsal.id, args.deliverable);
+        ctx.book.send({
+          type: "review", fromBotId: ctx.seat.botId, fromRole: "operator", toRole: "lead", companyId, parentId: null, budgetAuthId: null, replyPolicy: "report_only",
+          brief: {
+            goal: `Judge the bus-factor rehearsal of order ${order.id.slice(0, 8)} in company ${companyId}: would the customer accept the stand-in's work as readily as the original?`,
+            known: `Original: ${join(folderOf(companyId), order.deliverable ?? "")} (${order.summary ?? ""}). Stand-in, working from the packet alone: ${join(rehearsal.dir, args.deliverable)} (${args.summary}).`,
+            doneWhen: "cofactory_rehearsal_verdict is recorded with what differs and why",
+            constraints: "Judge the work the customer receives, not the wording. Missing steps the stand-in had to guess are a failure of the runbook, not of the stand-in.",
+          },
+        });
+        decide(ctx, "order.deliver", "allowed", `rehearsal of ${order.id.slice(0, 8)} delivered: ${args.deliverable}`, cited);
+        return ok({ rehearsal: { ...rehearsal, status: "delivered", deliverable: args.deliverable }, next: "the factory lead judges it" });
+      }
+      if (ctx.seat.role === "operator") return refused("a stand-in only delivers its rehearsal");
+      if (order.status !== "open") return refused(`that order is ${order.status}`);
+      const folder = folderOf(companyId);
+      const file = fileInside(folder, args.deliverable);
+      if (!file.ok) { decide(ctx, "order.deliver", "refused", file.reason, cited); return refused(file.reason); }
+      const runbook = runbookProblem(folder, order.openedAt);
+      if (runbook) { decide(ctx, "order.deliver", "refused", runbook, cited); return refused(runbook); }
+      const delivered = orders.deliver(order.id, { by: ctx.actor, summary: args.summary, deliverable: args.deliverable });
+      decide(ctx, "order.deliver", "allowed", `${order.id.slice(0, 8)} delivered: ${args.deliverable}`, cited);
+      return ok({ order: delivered, firstDollar: orders.firstDollar(companyId) });
+    },
+  }),
+  spec({
+    name: "cofactory_message_customer",
+    description: "Email a paying customer from the company's mailbox about their order: delivery, questions, receipts. Only addresses with an order, and never one that asked not to be contacted; prospects are reached through a sprint.",
+    roles: ["ceo", "builder", "seller"],
+    input: z.object({ to: z.string().email(), subject: z.string().min(2).max(200), text: z.string().min(10).max(20_000) }),
+    async run(args, ctx) {
+      if (!ctx.validation) return refused("validation is not running");
+      const { outreach, orders } = ctx.validation;
+      const companyId = ctx.seat.companyId!;
+      const sent = await outreach.sendCustomer(companyId, { to: args.to, subject: args.subject, text: args.text, isCustomer: (address) => orders.isCustomer(companyId, address) });
+      decide(ctx, "customer.message", sent.ok ? "allowed" : "refused", sent.ok ? `${args.to}: ${args.subject}` : sent.reason, [{ type: "company", id: companyId }]);
+      return sent.ok ? ok({ sent: true, messageId: sent.messageId }) : refused(sent.reason);
+    },
+  }),
+  spec({
+    name: "cofactory_invoice",
+    description: "Send a Stripe invoice from the company's account to a buyer who asked to pay that way. Only to someone who wrote to the company (a reply or a form on record); the payment comes back as an event when it is paid.",
+    roles: ["ceo", "seller"],
+    input: z.object({ customer_email: z.string().email(), description: z.string().min(5).max(500), amount_cents: z.number().int().positive().max(10_000_000), days_until_due: z.number().int().min(1).max(60).default(14) }),
+    async run(args, ctx) {
+      if (!ctx.validation) return refused("validation is not running");
+      const companyId = ctx.seat.companyId!;
+      const rails = ctx.validation.rails.get(companyId);
+      if (!rails.stripeSecretKey) return refused("the company's Stripe account is not connected; the owner connects it");
+      const address = args.customer_email.toLowerCase();
+      const wrote = ctx.truth.events({ companyId }).find((event) => (event.kind === "reply" || event.kind === "form_submit") && event.payerEmail?.toLowerCase() === address);
+      if (!wrote) { decide(ctx, "invoice.create", "refused", `${address} has not written to the company`, [{ type: "company", id: companyId }]); return refused("invoice only a buyer who wrote to the company asking to pay"); }
+      const cited: EvidenceLink[] = [{ type: "external_event", id: wrote.id, externalId: wrote.externalId, evidenceClass: wrote.evidenceClass }];
+      try {
+        const invoice = await createInvoice({ secretKey: rails.stripeSecretKey, companyId, customerEmail: address, description: args.description, amountCents: args.amount_cents, daysUntilDue: args.days_until_due });
+        decide(ctx, "invoice.create", "allowed", `${args.amount_cents} cents to ${address}: ${args.description}`, cited);
+        return ok({ invoice });
+      } catch (error) {
+        return refused(error instanceof Error ? error.message : String(error));
+      }
+    },
+  }),
+  spec({
+    name: "cofactory_rehearsal_verdict",
+    description: "Judge a stand-in's rehearsal: did the stand-in, working only from the handoff packet, serve the order as well as the original? Passing it completes the first-dollar gate; failing it sends the company back to rewrite its runbook. Either way the stand-in's seat is released.",
+    roles: ["lead"],
+    input: z.object({ company_id: z.string().min(1), passed: z.boolean(), note: z.string().min(30).max(2_000) }),
+    run(args, ctx) {
+      if (!ctx.validation) return refused("validation is not running");
+      const { orders } = ctx.validation;
+      const rehearsal = orders.rehearsals(args.company_id).at(-1);
+      if (!rehearsal || rehearsal.status !== "delivered") return refused("that company has no delivered rehearsal waiting for a verdict");
+      orders.rehearsalVerdict(rehearsal.id, args.passed, args.note);
+      ctx.book.unseat(rehearsal.botId);
+      decide(ctx, "rehearsal.verdict", "allowed", `${args.passed ? "passed" : "failed"}: ${args.note}`, [{ type: "company", id: args.company_id }], args.company_id);
+      return ok({ passed: args.passed, firstDollar: orders.firstDollar(args.company_id) });
+    },
+  }),
+  spec({
     name: "cofactory_postmortem",
     description: "Write the post-mortem of a killed company: the cause, the one assumption the evidence disproved, the lesson for picking the next niche, and the ids of the events, claim checks or signals it rests on. Future niche selection is penalised for resembling it.",
     roles: ["lead"],
@@ -460,6 +570,7 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
       const niche = link ? store.niche(link.nicheId) : null;
       const entry = { id: randomUUID(), companyId: args.company_id, nicheId: niche?.id ?? null, at: (ctx.now ?? Date.now)(), buyer: niche?.buyer ?? company.name, job: niche?.job ?? company.brief.slice(0, 200), cause: args.cause, falsified: args.falsified, lesson: args.lesson, evidence: args.evidence };
       store.addPostmortem(entry);
+      decide(ctx, "postmortem.write", "allowed", `${args.cause}: ${args.falsified}`, [{ type: "company", id: args.company_id }], args.company_id);
       return ok({ postmortem: entry });
     },
   }),

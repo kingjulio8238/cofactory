@@ -20,7 +20,7 @@ stage's row and its section when its status changes. The rules behind the pipeli
 | Pipeline | [P1 Discovery](#p1-discovery) | Done | Signals 100% verified; divergence under the ceiling across 10 simulated profiles |
 | Pipeline | [P2 Dossiers and scoring](#p2-dossiers-and-scoring) | Done (rediscovery baseline running) | Claim verifier ≥ 95%; adversarial Q&A; post-cutoff rediscovery baseline |
 | Pipeline | [P3 Offer and validation](#p3-offer-and-validation) | Built; the real sprint waits on the owner's rails | One real sprint completed inside its cap, gates fed by real events |
-| Pipeline | [P4 First dollar](#p4-first-dollar) | Not started | First arm's-length dollar, or a clean, post-mortemed kill |
+| Pipeline | [P4 First dollar](#p4-first-dollar) | Built; the live gate waits on the P3 rails | First arm's-length dollar, or a clean, post-mortemed kill |
 | Product | [X1 Owner experience](#x1-owner-experience) | Not started | The owner runs a full cycle from cards alone |
 | Product | [X2 Hard rails and scale](#x2-hard-rails-and-scale) | Not started | Calibration and divergence hold across ≥ 3 owner profiles |
 
@@ -613,7 +613,81 @@ buyers. It fails when the week runs out.
 - **The owner's go-ahead before any real person is contacted.**
 
 ### P4 First dollar
-Concierge fulfilment, invoices, the bus-factor test, and post-mortems that feed scoring.
+
+**Why:** the pipeline ends at the first arm's-length dollar, and P4 makes that dollar mean something. It must be a
+real payment, the work must be delivered by hand, and the work must not live only in one bot's head.
+
+| Piece | Where | What it does |
+|---|---|---|
+| Launch from a dossier | `launcher.launch({ dossierId })`, `cofactory_launch { dossier_id }`, `POST /api/cofactory/launch { dossierId }` | Only a shortlisted or championed dossier launches a company. The brief is built from it: buyer, job, offer against the human alternative, why the gap exists, first-ten plan, named buyers, failure modes, risks. The niche is claimed in the local and cross-factory registries, and the company is linked to its niche and dossier. |
+| Revenue booking | `bookRevenue` in `host.ts`, every tick | Detail below |
+| Related parties | `POST /api/cofactory/related-parties` (`<data>/cofactory-related.json`, 0600) | The owner's own emails and domains; payments from them never count as customers |
+| Orders | `server/cofactory/validation/orders.ts` (`<data>/cofactory-orders.db`) | Every booked payment opens one order. `cofactory_deliver_order` closes it, with two conditions below. An order open for more than 3 days raises `order_overdue`. |
+| Customer mail | `cofactory_message_customer` | Only addresses with an order and never a suppressed one. Prospects are reached only through a sprint. |
+| Invoices | `cofactory_invoice`, `createInvoice` | A Stripe invoice, finalized and sent, only to someone who wrote to the company. `invoice.paid` comes back as a payment through the same intake. |
+| Bus-factor rehearsal | `server/cofactory/validation/rehearsal.ts`, every tick | Detail below |
+| First-dollar gate | `orders.firstDollar(companyId)`, `GET /api/cofactory/orders`, `cofactory_orders` | Reached when an unrefunded arm's-length payment, its delivered order and a passed rehearsal all stand |
+| Post-mortems | `cofactory_postmortem` (lead), `postmortems` table in the discovery store | Detail below |
+| Company folder in every session | `sessions.ts` envelope | Every company session is told where its folder is, except a stand-in's, which is told only its packet |
+
+**Revenue booking:**
+- Each payment and deposit is booked as revenue once.
+- It must pass the arm's-length check:
+  - live mode;
+  - not from a related party;
+  - at least half the dossier's list price;
+  - not refunded.
+- A refund of a booked payment is booked as a refund.
+- Every payment is filed as a decision, `revenue.record`, whether allowed or refused.
+
+**Delivering an order** requires:
+- the deliverable is a non-empty file inside the company folder (`..`, absolute paths and links that leave it are refused);
+- RUNBOOK.md is at least 300 characters and was written after the order came in.
+
+**Bus-factor rehearsal:**
+1. After the first delivered order, a new stand-in bot takes the `operator` seat.
+2. It gets a handoff packet in a separate folder: BRIEF.md, RUNBOOK.md, JOURNAL.md, and ORDER.md (the payment and the customer's own messages, never the deliverable).
+3. It must serve the order again from the packet and deliver with `rehearsal: true`.
+4. The lead compares the two pieces of work and records `cofactory_rehearsal_verdict`. The stand-in's seat is then released.
+5. If the rehearsal fails, or the stand-in ends without delivering, `rehearsal_failed` is raised. A new rehearsal starts only after RUNBOOK.md is rewritten.
+
+**Post-mortems:**
+- Each records:
+  - the cause;
+  - the one falsified assumption;
+  - the lesson;
+  - the evidence ids.
+- A killed company without one raises `postmortem_missing`.
+- Each one lowers the pre-score of candidate niches that resemble it (similarity above 0.3), so a disproved idea is not retried in new words.
+
+**Evals:**
+- The `first-dollar-gate` suite has 17 cases:
+  - one order per payment;
+  - missing, absolute, escaping and linked deliverables;
+  - missing, thin and stale runbooks;
+  - double delivery;
+  - every partial gate state, including a refund after the gate was reached.
+- Result: 17/17, `false_pass` = 0.
+
+**Proof:**
+- `orders.test.ts`, 4 tests:
+  1. Delivery refusals in order, with the decision citing the committed payment.
+  2. Customer-only mail.
+  3. The full rehearsal loop: the packet holds no deliverable and no company folder; refusals outside the packet and for a non-rehearsal delivery; a failed verdict, an alarm, no retry until the runbook changes, then a second stand-in passes and the gate is reached.
+  4. A stand-in that gives up fails the rehearsal with its reason, and an overdue order raises an alarm.
+- `dossier.test.ts`: launch from a dossier, and the post-mortem penalty.
+- **`validation.e2e.test.ts` on a real dusk server:**
+  1. The signed payment is booked as 9,900 cents of revenue.
+  2. It opens an order for the buyer.
+  3. Once the owner's address is declared related, the owner's own payment is refused as revenue on record.
+
+**Known limits:**
+- The stand-in is told not to open the company folder but, as a Full-access bot, could. The lead's comparison is the
+  check; an identical copy is the signal.
+- The lead judges the rehearsal, so the verdict is a model judgement. The gate's other two legs are deterministic.
+
+**The exit gate** is the first arm's-length dollar, delivered and rehearsed, or a clean, post-mortemed kill. It needs
+the P3 rails and a real sprint, so it waits on the owner.
 
 ## Product
 

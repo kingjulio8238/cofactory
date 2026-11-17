@@ -28,6 +28,8 @@ import { duskMailPort } from "./validation/mail-dusk.ts";
 import { createOutreach, type MailPort, type Outreach } from "./validation/outreach.ts";
 import { openRails, type Rails } from "./validation/rails.ts";
 import { openSprints, type Sprints } from "./validation/sprints.ts";
+import { openOrders, type Orders } from "./validation/orders.ts";
+import { createRehearsals } from "./validation/rehearsal.ts";
 import { armsLength } from "./truth/classify.ts";
 import { writeFileAtomic } from "../atomic.ts";
 
@@ -97,7 +99,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     return discovery;
   };
   const dossierService = (): Dossiers => { discoveryService(); return dossiers!; };
-  let validation: { sprints: Sprints; outreach: Outreach; rails: Rails; saveOffer(companyId: string, html: string): string } | null = null;
+  let validation: { sprints: Sprints; outreach: Outreach; rails: Rails; orders: Orders; folderOf(companyId: string): string; saveOffer(companyId: string, html: string): string } | null = null;
   const offerFile = (companyId: string) => join(deps.dataDir, "cofactory-companies", companyId, "offer", "index.html");
   const validationParts = () => {
     if (validation) return validation;
@@ -106,7 +108,8 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     const mail: MailPort = deps.email ? duskMailPort(deps.email) : { send: async () => { throw new Error("email is not available on this server"); }, fetchNew: async () => [] };
     const outreach = createOutreach({ sprints, truth: evidence(), mail, mailboxFor: (companyId) => rails.peek(companyId)?.mailbox ?? null, cursor: sprints.cursor });
     validation = {
-      sprints, outreach, rails,
+      sprints, outreach, rails, orders: openOrders(join(deps.dataDir, "cofactory-orders.db")),
+      folderOf: (companyId) => join(deps.dataDir, "cofactory-companies", companyId),
       saveOffer(companyId, html) {
         const file = offerFile(companyId);
         mkdirSync(join(file, ".."), { recursive: true });
@@ -148,6 +151,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
         if (booked.has(event.externalId)) {
           if (refunded.has(event.externalId) && !seen.get(`refund_booked:${event.id}`)) {
             book.recordRefund({ companyId: company.id, cents: event.amountCents ?? 0, receipt: `refund:${event.externalId}` }, "intake");
+            parts.orders.refund(event.externalId);
             seen.set(`refund_booked:${event.id}`, 1);
           }
           continue;
@@ -157,6 +161,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
         const cited: EvidenceLink[] = [{ type: "external_event", id: event.id, externalId: event.externalId, evidenceClass: event.evidenceClass }];
         if (verdict.ok && (event.amountCents ?? 0) > 0) {
           const entry = book.recordRevenue({ companyId: company.id, cents: event.amountCents!, receipt: event.externalId }, "intake");
+          parts.orders.open({ companyId: company.id, eventId: event.id, externalId: event.externalId, customer: event.payerEmail, amountCents: event.amountCents! });
           observe().decide({ companyId: company.id, session: null, actor: "intake", kind: "revenue.record", verdict: "allowed", reason: `${event.amountCents} cents from ${event.payerEmail}${listPrice === null ? " (no list price on record)" : ""}`, evidence: [...cited, { type: "ledger_entry", id: entry.id }] });
         } else {
           observe().decide({ companyId: company.id, session: null, actor: "intake", kind: "revenue.record", verdict: "refused", reason: verdict.reasons.join("; ") || "zero amount", evidence: cited });
@@ -220,6 +225,10 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       for (const alarm of checkAlarms({ book: books(), truth: evidence(), store: parts.store, policy: parts.policy })) log(`cofactory: alarm ${alarm.kind}: ${alarm.detail}`);
       await sprintUpkeep(parts.store);
       bookRevenue();
+      if (deps.createBot) {
+        const createBot = deps.createBot;
+        await createRehearsals({ orders: validationParts().orders, book: books(), truth: evidence(), store: parts.store, sessions: parts.sessions, observe: observe(), folderOf: validationParts().folderOf, packetRoot: join(deps.dataDir, "cofactory-rehearsals"), createBot }).upkeep();
+      }
       const postmortems = new Set(discoveryService().store.postmortems().map((entry) => entry.companyId));
       for (const company of books().companies()) {
         if (company.status === "killed" && !postmortems.has(company.id)) parts.store.raise(company.id, "postmortem_missing", "a killed company needs its post-mortem (cofactory_postmortem)");
@@ -332,6 +341,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       discovery = null;
       dossiers = null;
       validation?.sprints.close();
+      validation?.orders.close();
       validation = null;
       registryClose = null;
       book?.close();

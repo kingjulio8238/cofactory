@@ -79,6 +79,7 @@ export function createSessions(deps: SessionDeps) {
       `Done when: ${session.doneWhen}`,
       `Budget: about ${minutes(session.budgetMs)} minutes and ${session.budgetCents} cents of model use.`,
       context ? `What woke this session:\n${clip(context, 6_000)}` : "",
+      session.companyId && session.role !== "operator" ? `Company folder (BRIEF.md, JOURNAL.md, RUNBOOK.md and the work itself): ${workspaces.dirOf(session.companyId)}` : "",
       `Company brief and standing rules (BRIEF.md):\n${clip(workspaces.brief(session.companyId), 4_000) || "(none yet)"}`,
       `Journal, most recent last:\n${journal || "(empty: this is the first session)"}`,
       alarms ? `Open alarms:\n${alarms}` : "",

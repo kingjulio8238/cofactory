@@ -19,6 +19,7 @@ import type { Discovery } from "../cofactory/discovery/discovery.ts";
 import type { Dossiers } from "../cofactory/dossier/dossiers.ts";
 import type { Rails } from "../cofactory/validation/rails.ts";
 import type { Sprints } from "../cofactory/validation/sprints.ts";
+import type { Orders } from "../cofactory/validation/orders.ts";
 import { PROFILE_FIELDS } from "../../shared/cofactory/discovery.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
@@ -39,7 +40,7 @@ export interface CofactoryRouteDeps {
   observe: () => Observer;
   discovery: () => Discovery;
   dossiers: () => Dossiers;
-  validation: () => { sprints: Sprints; rails: Rails };
+  validation: () => { sprints: Sprints; rails: Rails; orders: Orders };
   relatedParties?: { get(): { emails: string[]; domains: string[] }; set(value: { emails: string[]; domains: string[] }): void };
   traceDeps: () => TraceDeps;
   tick: () => Promise<void>;
@@ -126,6 +127,11 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
       }
       const railsPath = RAILS.exec(path);
       if (railsPath) return book.company(railsPath[1]!) ? json(res, 200, { rails: deps.validation().rails.summary(railsPath[1]!) }) : json(res, 404, { error: "no such company" });
+      if (path === "/api/cofactory/orders") {
+        const { orders } = deps.validation();
+        const ids = companyParam ? [companyParam] : book.companies().map((company) => company.id);
+        return json(res, 200, { companies: ids.map((id) => ({ companyId: id, orders: orders.list(id), rehearsals: orders.rehearsals(id), firstDollar: orders.firstDollar(id) })) });
+      }
       if (path === "/api/cofactory/sprints") {
         const { sprints } = deps.validation();
         const ids = companyParam ? [companyParam] : book.companies().map((company) => company.id);

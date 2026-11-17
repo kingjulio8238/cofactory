@@ -79,4 +79,72 @@ export function outreachGateSuite(): Suite {
   };
 }
 
-export const VALIDATION_SUITES: readonly Suite[] = [outreachGateSuite()];
+
+
+/**
+ * The first-dollar gate: an order counts as delivered only with the work inside the company folder and a runbook written
+ * for it, and the gate is reached only when a payment, a delivery and a passed stand-in rehearsal all stand.
+ */
+export function firstDollarSuite(): Suite {
+  return {
+    name: "first-dollar-gate",
+    async run() {
+      const { openOrders, fileInside, runbookProblem } = await import("../validation/orders.ts");
+      const { writeFileSync, utimesSync, mkdirSync, symlinkSync } = await import("node:fs");
+      const dir = mkdtempSync(join(tmpdir(), "cofactory-eval-orders-"));
+      const folder = join(dir, "company");
+      mkdirSync(folder);
+      let at = Date.UTC(2026, 10, 18, 9);
+      const orders = openOrders(join(dir, "orders.db"), { now: () => at });
+      const failures: string[] = [];
+      let correct = 0, total = 0, falsePass = 0;
+      const expect = (name: string, passed: boolean, shouldPass: boolean) => {
+        total++;
+        if (passed === shouldPass) correct++;
+        else failures.push(`${name}: expected ${shouldPass ? "pass" : "refusal"}`);
+        if (passed && !shouldPass) falsePass++;
+      };
+      try {
+        const order = orders.open({ companyId: "c", eventId: "e1", externalId: "pi_1", customer: "a@b.test", amountCents: 100 });
+        expect("reopening the same payment is one order", orders.open({ companyId: "c", eventId: "e1", externalId: "pi_1", customer: "a@b.test", amountCents: 100 }).id === order.id, true);
+        expect("missing deliverable", fileInside(folder, "report.md").ok, false);
+        writeFileSync(join(folder, "report.md"), "work");
+        writeFileSync(join(dir, "secret.md"), "outside");
+        symlinkSync(join(dir, "secret.md"), join(folder, "link.md"));
+        expect("absolute path", fileInside(folder, join(folder, "report.md")).ok, false);
+        expect("path escaping the folder", fileInside(folder, "../secret.md").ok, false);
+        expect("link escaping the folder", fileInside(folder, "link.md").ok, false);
+        expect("deliverable in the folder", fileInside(folder, "report.md").ok, true);
+        expect("no runbook", runbookProblem(folder, order.openedAt) === null, false);
+        writeFileSync(join(folder, "RUNBOOK.md"), "too short");
+        utimesSync(join(folder, "RUNBOOK.md"), new Date(at + 1_000), new Date(at + 1_000));
+        expect("thin runbook", runbookProblem(folder, order.openedAt) === null, false);
+        writeFileSync(join(folder, "RUNBOOK.md"), "step ".repeat(100));
+        utimesSync(join(folder, "RUNBOOK.md"), new Date(at - 60_000), new Date(at - 60_000));
+        expect("runbook not updated for this order", runbookProblem(folder, order.openedAt) === null, false);
+        utimesSync(join(folder, "RUNBOOK.md"), new Date(at + 1_000), new Date(at + 1_000));
+        expect("runbook written for this order", runbookProblem(folder, order.openedAt) === null, true);
+        expect("paid only", orders.firstDollar("c").reached, false);
+        orders.deliver(order.id, { by: "builder", summary: "done", deliverable: "report.md" });
+        expect("delivered twice", orders.deliver(order.id, { by: "builder", summary: "again", deliverable: "report.md" }) !== null, false);
+        expect("delivered without rehearsal", orders.firstDollar("c").reached, false);
+        const failed = orders.startRehearsal({ companyId: "c", orderId: order.id, botId: "s1", dir });
+        orders.rehearsalVerdict(failed.id, false, "missed a step");
+        expect("failed rehearsal", orders.firstDollar("c").reached, false);
+        at += 1_000;
+        const passed = orders.startRehearsal({ companyId: "c", orderId: order.id, botId: "s2", dir });
+        orders.rehearsalDelivered(passed.id, "out.md");
+        expect("rehearsal delivered but not judged", orders.firstDollar("c").reached, false);
+        orders.rehearsalVerdict(passed.id, true, "same work");
+        expect("paid, delivered and rehearsed", orders.firstDollar("c").reached, true);
+        orders.refund("pi_1");
+        expect("refunded order", orders.firstDollar("c").reached, false);
+        return { name: "first-dollar-gate", pass: correct === total && falsePass === 0, metrics: { accuracy: correct / total, false_pass: falsePass, cases: total }, failures };
+      } finally {
+        orders.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  };
+}
+export const VALIDATION_SUITES: readonly Suite[] = [outreachGateSuite(), firstDollarSuite()];

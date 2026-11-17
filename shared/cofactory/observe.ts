@@ -27,6 +27,7 @@ export const DECISION_KINDS = [
   "company.freeze", "company.unfreeze", "revenue.record", "session.end", "seat.change", "money.deposit", "money.reserve",
   "signal.record", "niche.propose", "niche.select", "dossier.submit", "dossier.champion",
   "sprint.start", "sprint.add_buyer", "outreach.send", "offer.publish", "payment_link.create",
+  "order.deliver", "customer.message", "invoice.create", "rehearsal.start", "rehearsal.verdict", "postmortem.write",
 ] as const;
 export type DecisionKind = (typeof DECISION_KINDS)[number];
 

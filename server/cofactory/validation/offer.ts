@@ -49,6 +49,26 @@ ${pay}${form}
 }
 
 /** Creates a Stripe payment link (product, price, link) for the offer, tagged with the company so payments route back. */
+/** Bills one customer by email on the company's Stripe account: a one-line invoice, finalized and sent, due in `daysUntilDue`. */
+export async function createInvoice(input: { secretKey: string; companyId: string; customerEmail: string; description: string; amountCents: number; currency?: string; daysUntilDue?: number }, fetchImpl: typeof fetch = fetch): Promise<{ id: string; url: string | null }> {
+  const call = async (path: string, params: Record<string, string>) => {
+    const response = await fetchImpl(`https://api.stripe.com/v1/${path}`, {
+      method: "POST", headers: { authorization: `Bearer ${input.secretKey}`, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(params).toString(),
+    });
+    const body = await response.json() as { id?: string; hosted_invoice_url?: string | null; error?: { message?: string } };
+    if (!response.ok || !body.id) throw new Error(`Stripe ${path}: ${body.error?.message ?? response.status}`);
+    return body;
+  };
+  const customer = await call("customers", { email: input.customerEmail, "metadata[company_id]": input.companyId });
+  const invoice = await call("invoices", {
+    customer: customer.id!, collection_method: "send_invoice", days_until_due: String(input.daysUntilDue ?? 14), pending_invoice_items_behavior: "exclude", "metadata[company_id]": input.companyId,
+  });
+  await call("invoiceitems", { customer: customer.id!, invoice: invoice.id!, amount: String(input.amountCents), currency: input.currency ?? "usd", description: input.description });
+  const finalized = await call(`invoices/${invoice.id}/finalize`, {});
+  await call(`invoices/${invoice.id}/send`, {});
+  return { id: invoice.id!, url: finalized.hosted_invoice_url ?? null };
+}
+
 export async function createPaymentLink(input: { secretKey: string; companyId: string; name: string; unitAmountCents: number; currency?: string; interval?: "month" | "year" | null }, fetchImpl: typeof fetch = fetch): Promise<{ url: string; id: string }> {
   const call = async (path: string, params: Record<string, string>) => {
     const response = await fetchImpl(`https://api.stripe.com/v1/${path}`, {
