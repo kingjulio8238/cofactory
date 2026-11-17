@@ -74,6 +74,9 @@ function lastEvalRun(file: string | undefined): { pass: boolean; at: string; fai
 }
 
 /** The owner's view and controls: deposits, seats, launches, revenue, the kill switch, and the ops board and traces. */
+/** The first search is small, so a new owner sees a launch request the same day; later searches use the full batch. */
+const FIRST_SEARCH_NICHES = 8;
+
 const COUNTRY_NAMES: Record<string, string> = {
   US: "United States", CA: "Canada", GB: "United Kingdom", IE: "Ireland", AU: "Australia", NZ: "New Zealand", DE: "Germany", FR: "France",
   NL: "Netherlands", BE: "Belgium", ES: "Spain", IT: "Italy", IN: "India",
@@ -331,7 +334,7 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
       const staffed = await runtime.launcher.staffFactory();
       const lead = staffed.find((seat) => seat.role === "lead");
       if (lead) deps.factoryOpened?.(lead.botId);
-      const batch = discovery.store.openBatch() ? null : discovery.startBatch("the factory's first search");
+      const batch = discovery.store.openBatch() ? null : discovery.startBatch("the factory's first search", Number(process.env.COFACTORY_FIRST_SEARCH_NICHES) || FIRST_SEARCH_NICHES);
       if (batch?.ok) void deps.tick();
       deps.settings.set({ onboardedAt: settings.onboardedAt ?? now() });
       record(null, "factory_open", `${staffed.length} seats, ${territories.length} territories`);

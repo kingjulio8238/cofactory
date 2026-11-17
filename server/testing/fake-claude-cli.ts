@@ -48,8 +48,8 @@
 //     text_delta chunks of `chars` chars every `ms` ms before its assistant message, after FAKE_CLAUDE_TOOL_CALLS_FILE's calls
 //   FAKE_CLAUDE_USES_CLOUD_COMPUTER  1: claim the mounted computer's control gate before continuing
 //   FAKE_CLAUDE_CONNECT_APPS  toolkits (gmail,slack): first call COMPOSIO_MANAGE_CONNECTIONS via `composio`
-//   FAKE_CLAUDE_MCP_TOOLS  JSON [{server?, tool, arguments?}] each turn first calls on its launch's MCP servers (server
-//     default "agents", the card tools), e.g. request_credential or show_widget, so a run draws the real cards those tools post
+//   FAKE_CLAUDE_MCP_TOOLS  JSON [{server?, tool, arguments?}] each turn first calls on its launch's MCP servers (server default "agents", the
+//     card tools), e.g. request_credential or show_widget; FAKE_CLAUDE_MCP_TOOL_ROUTES: path of {marker: calls}, the first marker in the prompt picks
 //   FAKE_CLAUDE_HOOKS  1: run the --settings hooks like the CLI (PostToolUse per tool_result, PostToolUseFailure for
 //     an ok:false call with its additionalContext echoed into the reply, Stop at the end)
 //   FAKE_CLAUDE_COMPACT  1: from the second turn, play a compaction (PreCompact, compact_boundary, then SessionStart "compact")
@@ -1095,8 +1095,8 @@ const playTurn = (prompt: JsonValue, late = false) => {
   }
 
   if (process.env.FAKE_CLAUDE_CONNECT_APPS) connectApps(process.env.FAKE_CLAUDE_CONNECT_APPS.split(",").filter(Boolean));
-  if (process.env.FAKE_CLAUDE_MCP_TOOLS) {
-    for (const call of JSON.parse(process.env.FAKE_CLAUDE_MCP_TOOLS) as Array<{ server?: string; tool: string; arguments?: Record<string, unknown> }>) {
+  if (process.env.FAKE_CLAUDE_MCP_TOOLS || process.env.FAKE_CLAUDE_MCP_TOOL_ROUTES) {
+    for (const call of (process.env.FAKE_CLAUDE_MCP_TOOLS ? JSON.parse(process.env.FAKE_CLAUDE_MCP_TOOLS) : Object.entries(JSON.parse(readFileSync(process.env.FAKE_CLAUDE_MCP_TOOL_ROUTES!, "utf8")) as Record<string, unknown[]>).find(([marker]) => String(prompt ?? "").includes(marker))?.[1] ?? []) as Array<{ server?: string; tool: string; arguments?: Record<string, unknown> }>) {
       callMcpTool(call.server ?? "agents", call.tool, call.arguments ?? {});
     }
   }

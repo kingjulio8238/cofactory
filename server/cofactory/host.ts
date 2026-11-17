@@ -31,6 +31,7 @@ import { openSprints, type Sprints } from "./validation/sprints.ts";
 import { openOrders, type Orders } from "./validation/orders.ts";
 import { createRehearsals } from "./validation/rehearsal.ts";
 import { closeIdleCompanies, openSettings } from "./settings.ts";
+import { fixtureFetcher } from "./evals/suites.ts";
 import { openApprovals, type Approval, type Approvals } from "./approvals.ts";
 import type { KillReason, SpendCategory } from "../../shared/cofactory/types.ts";
 import { armsLength } from "./truth/classify.ts";
@@ -91,7 +92,8 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
   let recovered: Promise<void> | null = null;
   const log = deps.log ?? ((line: string) => console.log(line));
   const books = (): Book => (book ??= openBook(join(deps.dataDir, "cofactory.db")));
-  const evidence = (): Truth => (truth ??= openTruth(join(deps.dataDir, "cofactory-evidence")));
+  // COFACTORY_TRUTH_FIXTURES=1 (end-to-end tests only): evidence is read from the eval fixture pages, not the internet
+  const evidence = (): Truth => (truth ??= openTruth(join(deps.dataDir, "cofactory-evidence"), process.env.COFACTORY_TRUTH_FIXTURES === "1" ? { fetch: fixtureFetcher } : {}));
   const seatOf = (botId: string): Membership | null => books().membership(botId);
   const observe = (): Observer => (observer ??= createObserver({ store: openObserveStore(join(deps.dataDir, "cofactory-observe.db")), book: books() }));
   let registry: ReturnType<typeof openLocalRegistry> | null = null;
@@ -261,12 +263,12 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     const policy: RuntimePolicy = { ...DEFAULT_RUNTIME_POLICY, ...deps.policy };
     const port: TurnPort = {
       threadFor(botId, companyId, title) {
-        const known = store.threadOf(botId, companyId);
-        if (known) return known;
-        const created = turns.createThread(botId, title);
-        if (!created) throw new Error("could not open a conversation for the seat");
-        store.setThread(botId, companyId, created);
-        return created;
+        // the bot's own chat whenever dusk gives one, so the owner sees the seat's work where they open the bot; a seat
+        // that worked elsewhere before moves there with its next session
+        const thread = turns.createThread(botId, title) ?? store.threadOf(botId, companyId);
+        if (!thread) throw new Error("could not open a conversation for the seat");
+        if (thread !== store.threadOf(botId, companyId)) store.setThread(botId, companyId, thread);
+        return thread;
       },
       start: turns.start,
       interrupt: turns.interrupt,
