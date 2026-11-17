@@ -8,6 +8,14 @@ export interface MailPort {
   fetchNew(mailbox: string, afterUid: number): Promise<Array<{ uid: number; messageId: string | null; inReplyTo: string | null; from: string; subject: string; text: string; date: number }>>;
 }
 
+const GIVEAWAY = /\b(free (trial|month|first|pilot|for (the|your) first)|first (month|order|report|job)s? (is |are )?(free|on us|at no cost)|no charge for the first|at no cost for the first)\b/i;
+
+/** Why an offer or a message gives the first orders away, or null: a free first order produces no committed evidence. */
+export function giveawayProblem(text: string): string | null {
+  const found = GIVEAWAY.exec(text);
+  return found ? `"${found[0]}" gives the first order away, so no payment can come of it; offer a money-back guarantee on a paid first order instead` : null;
+}
+
 const STOP = /\b(stop|unsubscribe|remove me|do not contact|don'?t contact|opt[ -]?out)\b/i;
 const BOUNCE_FROM = /mailer-daemon|postmaster/i;
 const BOUNCE_SUBJECT = /undeliver|delivery status notification|returned mail|failure notice|delivery failure/i;
@@ -32,6 +40,8 @@ export function createOutreach(deps: { sprints: Sprints; truth: Truth; mail: Mai
       const target = sprints.targets(sprintId).find((candidate) => candidate.id === targetId);
       if (!target) return { ok: false, reason: "that buyer is not on this sprint's list" };
       if (target.channel !== "email") return { ok: false, reason: `${target.name} is reached by ${target.channel}, not email` };
+      const giveaway = giveawayProblem(`${input.subject}\n${input.text}`);
+      if (giveaway) return { ok: false, reason: giveaway };
       const postal = deps.postalAddressFor(sprint.companyId);
       if (!postal) return { ok: false, reason: "the company has no postal address on record, which every outreach email must carry; the owner sets it" };
       if (sprints.touches(sprintId).length === 0) {

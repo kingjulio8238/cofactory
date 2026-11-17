@@ -23,7 +23,7 @@ import type { Sessions } from "./runtime/sessions.ts";
 import type { Observer } from "./observe/observer.ts";
 import type { Discovery } from "./discovery/discovery.ts";
 import type { Dossiers } from "./dossier/dossiers.ts";
-import type { Outreach } from "./validation/outreach.ts";
+import { giveawayProblem, type Outreach } from "./validation/outreach.ts";
 import type { Rails } from "./validation/rails.ts";
 import type { Sprints } from "./validation/sprints.ts";
 import { createInvoice, createPaymentLink, renderOfferPage } from "./validation/offer.ts";
@@ -379,7 +379,7 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
   }),
   spec({
     name: "cofactory_send_outreach",
-    description: "Email one buyer on the sprint's list from the company's mailbox. Write to them as a person: who you are, the specific problem you can take off their hands, the price, one clear next step. The opt-out line is added to first contact. Refused when the buyer is suppressed or a cap is reached (per day, per sprint, two contacts per buyer at least three days apart). Replies come back as events.",
+    description: "Email one buyer on the sprint's list from the company's mailbox. Write to them as a person: who you are, the specific problem you can take off their hands, the price, one clear next step. The opt-out line (first contact) and the company's postal address are added for you, so write neither. Never give the first order away. Refused when the buyer is suppressed or a cap is reached (per day, per sprint, two contacts per buyer at least three days apart). Replies come back as events.",
     roles: ["ceo", "marketer", "seller"],
     input: z.object({ buyer_id: z.string().min(1), subject: z.string().min(3).max(200), text: z.string().min(20).max(5_000) }),
     async run(args, ctx) {
@@ -421,6 +421,11 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
       if (!ctx.validation) return refused("validation is not running");
       const companyId = ctx.seat.companyId!;
       const rails = ctx.validation.rails.summary(companyId);
+      const giveaway = giveawayProblem([args.headline, args.for_whom, ...args.deliverables, args.price_line].join("\n"));
+      if (giveaway) {
+        decide(ctx, "offer.publish", "refused", giveaway, [{ type: "company", id: companyId }]);
+        return refused(giveaway);
+      }
       if (!rails.postalAddress) {
         decide(ctx, "offer.publish", "refused", "no postal address on the company's rails", [{ type: "company", id: companyId }]);
         return refused("the company has no postal address yet; the owner sets it on the company's rails before any page goes public");

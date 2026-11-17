@@ -728,11 +728,24 @@ The CEO also spent its session finding out that the rails were missing. Each tic
 naming what the owner has not connected, kept current as rails arrive. Every session sees it in its envelope, and the
 owner sees it in `/api/cofactory/state`.
 
-The `outreach-gate` eval grew to 26 cases:
+**Second shadow run:**
+- The dry-run first contact was allowed, so the company got as far as outreach.
+- It listed 4 buyers, each with a public contact route verified on their own page. A contact page that did not show the
+  address was refused.
+- It drafted 2 emails and correctly refused to email a buyer reachable only by a form or by phone.
+- The lead escalated the missing rails to the owner.
+- Both drafts still opened with **"Free trial"**: the written rule in the brief was ignored. So the rule is now a gate.
+  `giveawayProblem` refuses an outreach email or an offer page that gives the first order away ("free trial", "first
+  month free", "on us"). A money-back guarantee and a free call are still allowed.
+- The drafts also wrote their own opt-out line. The tool now says the opt-out line and the postal address are added
+  for the writer.
+
+The `outreach-gate` eval grew to 30 cases:
 - postal address on first and follow-up emails;
 - refused without a postal address;
 - refused while the offer does not load;
-- the week starting at the first contact.
+- the week starting at the first contact;
+- two giveaways refused, and a guarantee and a free call allowed.
 
 **The exit gate** is the first arm's-length dollar, delivered and rehearsed, or a clean, post-mortemed kill. It needs
 the P3 rails and a real sprint, so it waits on the owner.
