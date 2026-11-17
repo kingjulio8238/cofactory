@@ -808,7 +808,6 @@ The board as home, inbox cards, standups, the kill switch, onboarding and the ph
   updates.
 
 **Still to do:**
-- a company header strip;
 - renaming the packaged app and its bundle id (release scripts, computer-use permissions);
 - dusk's remaining pixel illustrations.
 
