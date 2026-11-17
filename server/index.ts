@@ -8836,7 +8836,7 @@ async function beginTurn(
 
       const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
       let browser: Awaited<ReturnType<typeof browserIntegration>> = null;
-      const skills = availableSkills(), phoneOffered = usbPhoneOffered(instance, skills) && !proactive.fence.confines(threadId) && !botApiThread(threadId);
+      const skills = availableSkills(), phoneOffered = usbPhoneOffered(instance, skills) && !proactive.fence.confines(threadId) && !botApiThread(threadId) && !cofactory.seated(bot.id);
       const selectedSkills = selectBundledSkills(
         providerText,
         [
@@ -8846,7 +8846,7 @@ async function beginTurn(
         skills,
       );
       if (phoneOffered) integrations.phone = phoneIntegration(bot.id, threadId, dispatchClaimId);
-      if (bot.composio !== false && composio.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
+      if (bot.composio !== false && !cofactory.seated(bot.id) && composio.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
         Object.assign(integrations, await teamConnections.appsIntegrations(bot, threadId, dispatchClaimId, instance.adapter.capabilities.mcpToolsFoundByName ? "dotted" : "plain"));
       }
       // User MCP servers' tools are never pre-allowed: every call rides the normal permission flow.
@@ -9250,7 +9250,7 @@ async function beginTurn(
         const seat = cofactory.integration(bot.id, { threadId, generation: dispatchClaimId }); if (seat) integrations.cofactory = seat;
       }
       if (liveBot && instance.adapter.capabilities.emailMcp === true && !cofactory.seated(liveBot.id)) { const mail = emailIntegration(liveBot, { threadId, generation: dispatchClaimId }); if (mail) integrations.email = mail; }
-      const phone = liveBot && instance.adapter.capabilities.deviceMcp === true ? phones.integration(liveBot, { threadId, generation: dispatchClaimId }) : null;
+      const phone = liveBot && instance.adapter.capabilities.deviceMcp === true && !cofactory.seated(liveBot.id) ? phones.integration(liveBot, { threadId, generation: dispatchClaimId }) : null;
       if (phone) integrations.device = phone;
       const mountedComputer = surfaceOfComputerKind(computerKind);
       if (
@@ -10770,7 +10770,7 @@ async function runClaimedGroupMemberTurn(
   );
   const roomContext = roomWindow.text;
   const turnImages = usesNativeImageInput ? [...burstImages, ...resolvedLatestImages.images] : [];
-  const skills = availableSkills(), phoneOffered = usbPhoneOffered(instance, skills);
+  const skills = availableSkills(), phoneOffered = usbPhoneOffered(instance, skills) && !cofactory.seated(bot.id);
   const selectedSkills = mergeSkills(
     selectBundledSkills(
       roomContext,
@@ -10785,7 +10785,7 @@ async function runClaimedGroupMemberTurn(
   );
   if (phoneOffered) integrations.phone = phoneIntegration(bot.id, threadId, internalGeneration);
   try {
-    if (bot.composio !== false && composio.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
+    if (bot.composio !== false && !cofactory.seated(bot.id) && composio.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
       Object.assign(integrations, await teamConnections.appsIntegrations(bot, threadId, internalGeneration, instance.adapter.capabilities.mcpToolsFoundByName ? "dotted" : "plain"));
     }
   } catch (error) {
@@ -10948,7 +10948,7 @@ async function runClaimedGroupMemberTurn(
     const seat = cofactory.integration(readyBot.id, { threadId, generation: internalGeneration }); if (seat) integrations.cofactory = seat;
   }
   if (instance.adapter.capabilities.emailMcp === true && !cofactory.seated(readyBot.id)) { const mail = emailIntegration(readyBot, { threadId, generation: internalGeneration }); if (mail) integrations.email = mail; }
-  const phone = instance.adapter.capabilities.deviceMcp === true ? phones.integration(readyBot, { threadId, generation: internalGeneration }) : null;
+  const phone = instance.adapter.capabilities.deviceMcp === true && !cofactory.seated(readyBot.id) ? phones.integration(readyBot, { threadId, generation: internalGeneration }) : null;
   if (phone) integrations.device = phone;
   const browserReadyBot = store.bot(readyBot.id);
   if (isCancelled?.() || !browserReadyBot?.busy ||

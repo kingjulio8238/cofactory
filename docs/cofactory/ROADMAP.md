@@ -744,6 +744,11 @@ owner sees it in `/api/cofactory/state`.
   makes `cofactory_journal` and `cofactory_end_session` refuse any claim of having messaged a seat or the owner when no
   typed message went from that seat to that role this session. Requests ("the CEO asked me to escalate") and plans
   ("will escalate") pass.
+- **A seat looked at driving the owner's own phone** to call a buyer reachable only by phone. dusk had given it the
+  USB-phone tool, which happened to be busy. A seat acts for a company, never as the owner. Seated bots now get none of
+  these: the owner's USB phone, the paired device, or the owner's connected accounts (Composio); they also never had
+  dusk's mailbox. Buyers reachable only by form or phone stay off the outreach list until the company has a channel of
+  its own.
 
 The `outreach-gate` eval grew to 30 cases:
 - postal address on first and follow-up emails;

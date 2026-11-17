@@ -273,7 +273,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       writeFileAtomic(relatedFile, JSON.stringify(value), { mode: 0o600 });
     },
     bookRevenue,
-    /** Whether a bot holds a Cofactory seat: a company seat sends mail only through the outreach gate. */
+    /** Whether a bot holds a Cofactory seat. A seat acts for a company, never as the owner: it gets no owner mailbox, phone or connected accounts, and mails only through the outreach gate. */
     seated: (botId: string) => seatOf(botId) !== null,
     traceDeps,
     tick,
