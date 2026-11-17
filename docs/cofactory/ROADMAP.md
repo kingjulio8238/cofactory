@@ -789,6 +789,30 @@ the P3 rails and a real sprint, so it waits on the owner.
 ### X1 Owner experience
 The board as home, inbox cards, standups, the kill switch, onboarding and the phone.
 
+**Built so far, all inside dusk's own shell:**
+- **First run:** see [`onboarding-flow.md`](onboarding-flow.md). It ends with the factory opening on its own territories.
+- **Characters:** your agent characters replace dusk's pixel mascots, and each role has its own look. A company's crew
+  shares the company's colour. The app icon, the menu-bar glyph and the startup screen use them too.
+- **Factory tab** in the bot panel:
+  - Needs you, with Approve and Decline;
+  - what the bot is doing now;
+  - the first week, the territories and the latest finds;
+  - per company: money, days to a paying customer, the sprint and the first-dollar gate.
+- **Company rail:** the factory plus one character per live company, with a dot for what needs the owner. Choosing
+  one scopes the sidebar to its crew.
+- **Owner controls:**
+  - launches, large spends and closes wait for approval when the owner asked;
+  - 5 days to a paying customer, counted from going live, and 14 days to go live at all;
+  - a daily ceiling on model use.
+- **The factory lead is the chief of staff,** seats work in their own chat, and packaged builds never take dusk.bot's
+  updates.
+
+**Still to do:**
+- a company header strip;
+- renaming the packaged app and its bundle id (release scripts, computer-use permissions);
+- dusk's remaining pixel illustrations.
+
+
 ### X2 Hard rails and scale
 A virtual card and model key per company, multiple factories, and calibration re-fit on post-mortems.
 
