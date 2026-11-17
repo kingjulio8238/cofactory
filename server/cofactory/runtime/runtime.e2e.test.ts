@@ -77,6 +77,8 @@ describe("cofactory runtime on a real dusk server", () => {
     await new Promise((resolve) => first.exitCode !== null ? resolve(null) : first.once("exit", resolve));
 
     startServer(port, { FAKE_CLAUDE_MCP_TOOLS: JSON.stringify([
+      { server: "cofactory", tool: "cofactory_authorize_spend", arguments: { category: "infra", vendor: "porkbun", cents: 1_200, purpose: "the offer's domain" } },
+      { server: "cofactory", tool: "cofactory_authorize_spend", arguments: { category: "distribution", vendor: "ads", cents: 500, purpose: "an ad test" } },
       { server: "cofactory", tool: "cofactory_journal", arguments: { did: "re-checked the offer page after the restart", learned: "nothing was lost", next: "contact 20 contractors" } },
       { server: "cofactory", tool: "cofactory_end_session", arguments: { outcome: "done", summary: "offer page re-checked" } },
     ]) });
@@ -94,6 +96,26 @@ describe("cofactory runtime on a real dusk server", () => {
     expect(readFileSync(join(workspace, "BRIEF.md"), "utf8")).toContain("Only arm's-length money counts");
     expect(readFileSync(join(workspace, "JOURNAL.md"), "utf8")).toContain("re-checked the offer page after the restart");
     expect(execFileSync("git", ["log", "--format=%s"], { cwd: workspace, encoding: "utf8" })).toMatch(/session [0-9a-f]{8} ceo completed/);
+
+    const sessionTrace = (await call("GET", `/api/cofactory/trace/session/${session.id}`)).body;
+    expect(sessionTrace.toolCalls.map((record: { tool: string; ok: boolean }) => [record.tool, record.ok])).toEqual(expect.arrayContaining([
+      ["cofactory_authorize_spend", true], ["cofactory_authorize_spend", false], ["cofactory_journal", true], ["cofactory_end_session", true],
+    ]));
+    expect(sessionTrace.decisions.map((decision: { kind: string; verdict: string; problem: string | null }) => [decision.kind, decision.verdict, decision.problem])).toEqual(expect.arrayContaining([
+      ["spend.authorize", "allowed", null], ["spend.authorize", "refused", null], ["session.end", "allowed", null],
+    ]));
+    const companyTrace = (await call("GET", `/api/cofactory/trace/company/${companyId}`)).body;
+    expect(companyTrace.untraceable).toEqual([]);
+    expect(companyTrace.timeline.map((item: { source: string }) => item.source)).toEqual(expect.arrayContaining(["books", "ledger", "session", "journal", "decision", "owner"]));
+    expect(companyTrace.costByStage).toEqual([expect.objectContaining({ stage: "build" })]);
+    const board = await fetch(`${url}/api/cofactory/board`);
+    expect(board.headers.get("content-type")).toMatch(/text\/html/);
+    const page = await board.text();
+    expect(page).toContain("Tender Watch");
+    expect(page).toContain("spend.authorize");
+    expect(await (await fetch(`${url}/api/cofactory/board.txt`)).text()).toMatch(/Tender Watch\s+\| build/);
+    const owner = (await call("GET", "/api/cofactory/autonomy")).body.companies as Array<{ companyId: string | null; ownerTouches: number; why: Array<[string, number]> }>;
+    expect(owner.find((item) => item.companyId === companyId)?.why).toEqual([["route:launch", 1]]);
 
     const state = (await call("GET", "/api/cofactory/state")).body;
     expect(state.runtime.liveSessions.filter((live: { botId: string }) => live.botId === ceoId)).toEqual([]);

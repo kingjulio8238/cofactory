@@ -16,7 +16,7 @@ stage's row and its section when its status changes. The rules behind the pipeli
 | Foundations | [F1 Truth layer](#f1-truth-layer) | Done | Hand-made true/false claims and events are classified correctly |
 | Foundations | [F2 Eval harness](#f2-eval-harness) | Done (core) | Runs in one command; flags a planted regression |
 | Foundations | [F3 Runtime and persistence](#f3-runtime-and-persistence) | Done | A fake-engine company survives kills, restarts and a multi-day simulated run with no zombie state |
-| Foundations | [F4 Observability](#f4-observability) | Not started | Every gate decision is traceable to its evidence and its cost |
+| Foundations | [F4 Observability](#f4-observability) | Done | Every gate decision is traceable to its evidence and its cost |
 | Pipeline | [P1 Discovery](#p1-discovery) | Not started | Signals 100% verified; divergence under the ceiling across 10 simulated profiles |
 | Pipeline | [P2 Dossiers and scoring](#p2-dossiers-and-scoring) | Not started | Claim verifier ≥ 95%; adversarial Q&A; post-cutoff rediscovery baseline |
 | Pipeline | [P3 Offer and validation](#p3-offer-and-validation) | Not started | One real sprint completed inside its cap, gates fed by real events |
@@ -271,7 +271,67 @@ A condition that clears resolves its alarm.
 
 **Why:** we can't tune what we can't see, and "share of actions that needed the owner" is the autonomy metric.
 
-**Scope:** traces per session, an internal ops board, shadow and real cost per stage, and an owner-touch log.
+**Exit gate:** every decision at a gate can be traced to its evidence and its cost.
+
+| Piece | Where | What it does |
+|---|---|---|
+| Observation log | `server/cofactory/observe/store.ts` → `<data>/cofactory-observe.db` | Append-only decisions at gates, tool calls and owner touches |
+| Decisions | `decide()` in `server/cofactory/tools.ts` and the owner routes | Each one carries its evidence and the company's cost at that moment (detail below) |
+| Tool calls | `runTool` | Every Cofactory tool call, with seat, session, ok/refused, a result summary and duration |
+| Owner touches | owner routes; `observeEvent` on dusk's `request.opened` | Every time the owner acts. Manually relaying an outside event counts too, until webhooks feed events directly. |
+| Cost by stage | `server/cofactory/observe/cost.ts` | Model cost and real spend booked while the company sat in each stage, from its own event trail |
+| Traces | `server/cofactory/observe/trace.ts` | Session trace and company trace (detail below) |
+| Autonomy | `autonomy()` | Seat actions against owner touches per company, with the reasons |
+| Ops board | `server/cofactory/observe/board.ts`; `GET /api/cofactory/board` (page, refreshes every 15 s), `board.txt`, `board.json`; `pnpm cofactory:board [--url] [--watch N]` | Factory money, last eval run, one row per company, live sessions, alarms, the last 40 decisions with evidence and cost, and owner share over 7 days. Internal operations, not the product UI (that is X1). |
+
+**Decisions in detail:**
+- Covers stage moves, spend holds, charges and voids, launch, top-up, kill, freeze, revenue, seats, deposits, reserve
+  and session ends, whether allowed or refused.
+- Evidence links resolve in the evidence store or the books: claim check, external event, hold, ledger entry,
+  company, session.
+- Cost: the company's model cost, real spend and available money at that moment, plus the deciding session's model
+  cost.
+
+**Traces in detail:**
+- **Session trace:** the session's trail, journal, tool calls, decisions with their evidence looked up, owner touches,
+  and cost.
+- **Company trace:** one timeline covering the books, ledger, outside world, sessions, journal, decisions and owner,
+  plus cost by stage. It also lists every untraceable decision.
+- `traceProblem` defines traceable: a cost snapshot is present and every link resolves. An allowed move of a stage or
+  money must carry a link (a move to design needs none).
+
+**New routes:**
+- `GET /api/cofactory/trace/session/:id`
+- `GET /api/cofactory/trace/company/:id`
+- `GET /api/cofactory/costs`
+- `GET /api/cofactory/decisions`
+- `GET /api/cofactory/autonomy`
+- `GET /api/cofactory/board`
+
+**Proof:**
+- **`traceability` eval suite** (in `pnpm cofactory:eval`): a scripted factory run through the real tools.
+  - It produces 16 decisions, 5 of them refused.
+  - Bar: 100% traceable, and exactly one decision per gate tool call. Current result: traceable = 1.
+  - Removing one tool's decision fails it, and so does pointing a decision at a made-up ledger entry.
+- **`server/cofactory/observe/observe.test.ts`:**
+  - cost split by stage
+  - a decision filed with a claim-check link and its cost
+  - company timeline order with nothing untraceable
+  - owner share
+  - the board in text and HTML, with anything bots or buyers wrote escaped
+- **`runtime.e2e.test.ts` extended on a real server:**
+  - The session trace holds the seat's real MCP tool calls and decisions, allowed and refused.
+  - The company trace has no untraceable decision.
+  - The board page and text render.
+  - Autonomy reports the owner's launch as the company's one touch.
+
+**A bug the board found:**
+- On a default fixture the first operating session ended `interrupted`. dusk fires a turn's settle while its
+  conversation is still winding down, so the next round's start was refused with "already working".
+- Fix: a refused round start is retried with backoff (0.5–16 s, 6 tries, each logged as `start_retry`) before the
+  session is given up.
+- Covered by a test. On the fixture, the session now runs its rounds and stops correctly at `short_rounds` for a fake
+  seat that only acknowledges, which the board shows as an `unjournaled` alarm.
 
 ## Pipeline
 
@@ -301,3 +361,4 @@ A virtual card and model key per company, multiple factories, and calibration re
 - **2026-11-17:** F0 done. Roadmap approved. F1 and F2 started.
 - **2026-11-17:** F1 done and F2 core done. Stage gates now read the world. 34 unit tests pass, and `pnpm cofactory:eval` passes. Next: F3, runtime and persistence.
 - **2026-11-17:** F3 done: sessions, journal, company folders, keep-working re-entry, restart recovery, zombie sweep, scheduler (cadence, event and message wakes), alarms and the launcher. 15 runtime tests plus a real-server kill and restart e2e. Next: F4, observability.
+- **2026-11-17:** F4 done: an append-only log of decisions with evidence and cost, tool calls and owner touches; cost by stage; session and company traces; autonomy; the ops board (page, text, CLI). The traceability eval passes at 100%. The board caught a round-start race, now fixed. Foundations F0–F4 are complete. Next: P1, discovery.

@@ -12,6 +12,9 @@ import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
 import { createWorkspaces } from "./runtime/workspace.ts";
 import { runTool, toolsFor, type ToolResult } from "./tools.ts";
 import { openTruth, type Truth } from "./truth/store.ts";
+import { createObserver, type Observer } from "./observe/observer.ts";
+import { openObserveStore } from "./observe/store.ts";
+import type { TraceDeps } from "./observe/trace.ts";
 
 export const COFACTORY_INTERNAL_MCP_PATH = "/api/internal/cofactory/mcp";
 
@@ -53,12 +56,15 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
   let book: Book | null = null;
   let truth: Truth | null = null;
   let runtime: Runtime | null = null;
+  let observer: Observer | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
   let ticking = false;
   const log = deps.log ?? ((line: string) => console.log(line));
   const books = (): Book => (book ??= openBook(join(deps.dataDir, "cofactory.db")));
   const evidence = (): Truth => (truth ??= openTruth(join(deps.dataDir, "cofactory-evidence")));
   const seatOf = (botId: string): Membership | null => books().membership(botId);
+  const observe = (): Observer => (observer ??= createObserver({ store: openObserveStore(join(deps.dataDir, "cofactory-observe.db")), book: books() }));
+  const traceDeps = (): TraceDeps => ({ book: books(), truth: evidence(), observe: observe().store, runtime: runtimeParts()?.store ?? null });
 
   function runtimeParts(): Runtime | null {
     if (runtime) return runtime;
@@ -106,7 +112,21 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     books,
     evidence,
     runtime: runtimeParts,
+    observe,
+    traceDeps,
     tick,
+
+    /** Notes the owner's part in a seat's turn: a question or an approval the person is asked for. */
+    observeEvent(event: { type: string; threadId?: string; requestType?: string; tool?: string; summary?: string }): void {
+      if (event.type !== "request.opened" || !event.threadId) return;
+      const parts = runtimeParts();
+      const seat = parts?.store.seatOfThread(event.threadId);
+      if (!seat) return;
+      observe().touch({
+        companyId: seat.companyId, sessionId: parts!.store.liveFor(seat.botId)?.id ?? null,
+        source: event.requestType === "question" ? "question" : "approval", kind: event.tool ?? event.requestType ?? "request", detail: event.summary ?? "",
+      });
+    },
 
     /** Recovers sessions a restart cut off, then ticks on an interval. */
     async start(): Promise<void> {
@@ -146,7 +166,8 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       const params = (request.params && typeof request.params === "object" ? request.params : {}) as { name?: unknown; arguments?: unknown };
       const parts = runtimeParts();
       const result = await runTool({
-        book: books(), truth: evidence(), seat, actor: `${seat.role}:${ctx.botName}`,
+        book: books(), truth: evidence(), seat, actor: `${seat.role}:${ctx.botName}`, observe: observe(),
+        session: parts?.store.liveFor(seat.botId) ?? null,
         ...(parts ? { sessions: parts.sessions } : {}), ...(parts?.launcher ? { launcher: parts.launcher } : {}),
       }, params.name, params.arguments);
       ctx.assertActive();
@@ -167,6 +188,8 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       if (timer) clearInterval(timer);
       timer = null;
       runtime?.store.close();
+      observer?.store.close();
+      observer = null;
       book?.close();
       truth?.close();
       runtime = null;

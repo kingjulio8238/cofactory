@@ -17,6 +17,9 @@ import { verifyEvidence } from "./truth/gate.ts";
 import type { Truth } from "./truth/store.ts";
 import type { Launcher } from "./runtime/launcher.ts";
 import type { Sessions } from "./runtime/sessions.ts";
+import type { Observer } from "./observe/observer.ts";
+import type { DecisionKind, EvidenceLink } from "../../shared/cofactory/observe.ts";
+import type { Session } from "../../shared/cofactory/runtime.ts";
 
 export type ToolResult = { content: Array<{ type: "text"; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -48,6 +51,14 @@ export interface ToolContext {
   sessions?: Sessions;
   launcher?: Launcher;
   now?: () => number;
+  observe?: Observer;
+  /** The seat's running session, which decisions and tool calls are filed under. */
+  session?: Session | null;
+}
+
+/** Files a gate decision with its evidence and the cost it was made at. */
+function decide(ctx: ToolContext, kind: DecisionKind, verdict: "allowed" | "refused", reason: string, evidence: EvidenceLink[], companyId: string | null = ctx.seat.companyId): void {
+  ctx.observe?.decide({ companyId, session: ctx.session ?? null, actor: ctx.actor, kind, verdict, reason, evidence });
 }
 
 interface ToolSpec<S extends z.ZodType> {
@@ -83,9 +94,12 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     description: "Ask for a hold on your company's money before any real-dollar purchase. Nothing may be bought without one. Returns a hold id to capture once the vendor charges, or the reason it was refused.",
     roles: SPENDERS,
     input: z.object({ category: z.enum(SPEND_CATEGORIES), vendor: z.string().min(1).max(200), cents, purpose: z.string().min(1).max(500) }),
-    run(args, { book, seat, actor }) {
+    run(args, ctx) {
+      const { book, seat, actor } = ctx;
       const result = book.authorize({ companyId: seat.companyId!, category: args.category, vendor: args.vendor, cents: args.cents }, actor);
-      return result.ok ? ok({ hold: result.authorization }) : refused(result.reason);
+      if (!result.ok) { decide(ctx, "spend.authorize", "refused", `${args.cents} cents ${args.category} at ${args.vendor}: ${result.reason}`, []); return refused(result.reason); }
+      decide(ctx, "spend.authorize", "allowed", `${args.cents} cents ${args.category} at ${args.vendor} for ${args.purpose}`, [{ type: "hold", id: result.authorization.id }]);
+      return ok({ hold: result.authorization });
     },
   }),
   spec({
@@ -93,10 +107,13 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     description: "Record the real charge against a hold, with the vendor's receipt or invoice id. cents defaults to the held amount and may not exceed it.",
     roles: SPENDERS,
     input: z.object({ hold_id: z.string().min(1), cents: cents.optional(), receipt: z.string().min(1).max(500) }),
-    run(args, { book, seat, actor }) {
-      if (book.authorization(args.hold_id)?.companyId !== seat.companyId) return refused("no hold with that id for your company");
+    run(args, ctx) {
+      const { book, seat, actor } = ctx;
+      if (book.authorization(args.hold_id)?.companyId !== seat.companyId) { decide(ctx, "spend.capture", "refused", "no hold with that id for this company", []); return refused("no hold with that id for your company"); }
       const result = book.capture(args.hold_id, { ...(args.cents !== undefined ? { cents: args.cents } : {}), receipt: args.receipt }, actor);
-      return result.ok ? ok({ entry: result.entry, availableCents: book.available(seat.companyId!) }) : refused(result.reason);
+      if (!result.ok) { decide(ctx, "spend.capture", "refused", result.reason, [{ type: "hold", id: args.hold_id }]); return refused(result.reason); }
+      decide(ctx, "spend.capture", "allowed", `${result.entry.cents} cents, receipt ${args.receipt}`, [{ type: "hold", id: args.hold_id }, { type: "ledger_entry", id: result.entry.id }]);
+      return ok({ entry: result.entry, availableCents: book.available(seat.companyId!) });
     },
   }),
   spec({
@@ -104,9 +121,12 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     description: "Release a hold you no longer need, so its money is available again.",
     roles: SPENDERS,
     input: z.object({ hold_id: z.string().min(1) }),
-    run(args, { book, seat }) {
-      if (book.authorization(args.hold_id)?.companyId !== seat.companyId) return refused("no hold with that id for your company");
-      return book.voidAuthorization(args.hold_id) ? ok({ voided: args.hold_id }) : refused("no open hold with that id");
+    run(args, ctx) {
+      const { book, seat } = ctx;
+      if (book.authorization(args.hold_id)?.companyId !== seat.companyId) { decide(ctx, "spend.void", "refused", "no hold with that id for this company", []); return refused("no hold with that id for your company"); }
+      const voided = book.voidAuthorization(args.hold_id);
+      decide(ctx, "spend.void", voided ? "allowed" : "refused", voided ? "hold released" : "no open hold with that id", [{ type: "hold", id: args.hold_id }]);
+      return voided ? ok({ voided: args.hold_id }) : refused("no open hold with that id");
     },
   }),
   spec({
@@ -114,12 +134,22 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     description: "Move your company to its next stage. Market needs path_live evidence, Sell needs selling_signal evidence, Manage needs recorded revenue or repeatable_motion evidence. The ref is checked against the world: path_live may be the offer page's URL (it must load for a stranger) or a recorded event id; selling_signal must be a recorded reply, form or payment event that reads urgent or committed; repeatable_motion must be a recorded payment.",
     roles: ["ceo"],
     input: z.object({ to: z.enum(STAGES), evidence: evidence.optional() }),
-    async run(args, { book, truth, seat, actor }) {
+    async run(args, ctx) {
+      const { book, truth, seat, actor } = ctx;
+      const links: EvidenceLink[] = [];
+      let because = "";
       if (args.evidence) {
         const checked = await verifyEvidence(truth, seat.companyId!, args.evidence);
-        if (!checked.ok) return refused(`evidence did not check out: ${checked.reason}`);
+        if (checked.link) links.push(checked.link);
+        if (!checked.ok) { decide(ctx, "stage.advance", "refused", `to ${args.to}: evidence did not check out: ${checked.reason}`, links); return refused(`evidence did not check out: ${checked.reason}`); }
+        because = checked.reason;
+      } else if (args.to === "manage") {
+        const revenue = book.entries({ companyId: seat.companyId! }).filter((entry) => entry.kind === "revenue");
+        links.push(...revenue.map((entry): EvidenceLink => ({ type: "ledger_entry", id: entry.id })));
+        because = `${revenue.length} revenue entries`;
       }
       const result = book.advance(seat.companyId!, args.to, args.evidence ?? null, actor);
+      decide(ctx, "stage.advance", result.ok ? "allowed" : "refused", result.ok ? `to ${args.to}${because ? `: ${because}` : ""}` : `to ${args.to}: ${result.reason}`, links);
       return result.ok ? ok({ company: result.company }) : refused(result.reason);
     },
   }),
@@ -153,12 +183,14 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
       waiting_on: z.string().max(500).optional(),
       wake_in_hours: z.number().positive().max(24 * 14).optional(),
     }),
-    run(args, { seat, sessions, now }) {
+    run(args, ctx) {
+      const { seat, sessions, now } = ctx;
       if (!sessions) return refused("the runtime is not running");
       if (args.outcome === "waiting" && (!args.waiting_on?.trim() || args.wake_in_hours === undefined)) return refused("waiting needs waiting_on (what you wait for) and wake_in_hours");
       const summary = args.outcome === "waiting" ? `${args.summary} (waiting on: ${args.waiting_on})` : args.summary;
       const nextWakeAt = args.wake_in_hours === undefined ? null : (now ?? Date.now)() + args.wake_in_hours * 60 * 60_000;
       const ended = sessions.requestEnd(seat, { outcome: args.outcome, summary, nextWakeAt });
+      decide(ctx, "session.end", ended.ok ? "allowed" : "refused", ended.ok ? `${args.outcome}: ${summary}` : ended.reason, ctx.session ? [{ type: "session", id: ctx.session.id }] : []);
       return ended.ok ? ok({ ending: { sessionId: ended.session.id, outcome: args.outcome } }) : refused(ended.reason);
     },
   }),
@@ -203,14 +235,13 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     description: "Launch a company from a scored idea with a hard cap taken from unallocated money: its books, its workspace and brief, and a seated team (CEO, builder, marketer). Refused below the minimum stake, past the live-company limit, or beyond unallocated money.",
     roles: ["lead"],
     input: z.object({ name: z.string().min(1).max(120), brief: z.string().min(1).max(4_000), cap_cents: cents }),
-    async run(args, { book, actor, launcher }) {
+    async run(args, ctx) {
+      const { book, actor, launcher } = ctx;
       const input = { name: args.name, brief: args.brief, capCents: args.cap_cents };
-      if (launcher) {
-        const launched = await launcher.launch(input, actor);
-        return launched.ok ? ok({ company: launched.company, team: launched.team }) : refused(launched.reason);
-      }
-      const result = book.launch(input, actor);
-      return result.ok ? ok({ company: result.company }) : refused(result.reason);
+      const result = launcher ? await launcher.launch(input, actor) : book.launch(input, actor);
+      if (!result.ok) { decide(ctx, "company.launch", "refused", `${args.name} with ${args.cap_cents} cents: ${result.reason}`, [], null); return refused(result.reason); }
+      decide(ctx, "company.launch", "allowed", `${args.name} with a ${args.cap_cents}-cent cap`, [{ type: "company", id: result.company.id }], result.company.id);
+      return ok({ company: result.company, ...("team" in result ? { team: result.team } : {}) });
     },
   }),
   spec({
@@ -218,8 +249,9 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     description: "Give a live company more money from unallocated, after a selling signal.",
     roles: ["lead"],
     input: z.object({ company_id: z.string().min(1), cents }),
-    run(args, { book, actor }) {
-      const result = book.topUp(args.company_id, args.cents, actor);
+    run(args, ctx) {
+      const result = ctx.book.topUp(args.company_id, args.cents, ctx.actor);
+      decide(ctx, "company.top_up", result.ok ? "allowed" : "refused", result.ok ? `${args.cents} cents` : result.reason, [{ type: "company", id: args.company_id }], args.company_id);
       return result.ok ? ok({ company: result.company }) : refused(result.reason);
     },
   }),
@@ -228,8 +260,10 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     description: "Stop a company for good: its holds are voided and its remaining money returns to unallocated. Give the reason and what the post-mortem should teach the scout.",
     roles: ["lead"],
     input: z.object({ company_id: z.string().min(1), reason: z.enum(KILL_REASONS), why: z.string().min(1).max(2_000) }),
-    async run(args, { book, actor, sessions }) {
+    async run(args, ctx) {
+      const { book, actor, sessions } = ctx;
       const result = book.kill(args.company_id, args.reason, actor, args.why);
+      decide(ctx, "company.kill", result.ok ? "allowed" : "refused", result.ok ? `${args.reason}: ${args.why}` : result.reason, [{ type: "company", id: args.company_id }], args.company_id);
       if (result.ok) await sessions?.stopCompany(args.company_id, `killed: ${args.why}`);
       return result.ok ? ok({ company: result.company, releasedCents: result.releasedCents }) : refused(result.reason);
     },
@@ -264,5 +298,11 @@ export async function runTool(ctx: ToolContext, name: unknown, args: unknown): P
   if (!tool || !tool.roles.includes(seat.role)) return refused(`${String(name)} is not a tool for the ${seat.role} seat`);
   const parsed = tool.input.safeParse(args ?? {});
   if (!parsed.success) return refused(`invalid arguments: ${parsed.error.issues.map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`).join("; ")}`);
-  return tool.run(parsed.data, ctx);
+  const started = Date.now();
+  const result = await tool.run(parsed.data, ctx);
+  ctx.observe?.toolCall({
+    sessionId: ctx.session?.id ?? null, companyId: seat.companyId, botId: seat.botId, role: seat.role, tool: tool.name,
+    ok: !result.isError, summary: result.content[0]?.text.slice(0, 300) ?? "", tookMs: Date.now() - started,
+  });
+  return result;
 }

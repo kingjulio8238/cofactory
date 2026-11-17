@@ -188,6 +188,12 @@ export function openRuntimeStore(file: string, now: () => number = Date.now) {
       db.prepare("INSERT INTO cursors (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value").run(name, value);
     },
 
+    /** The seat a runtime conversation belongs to, if it is one. */
+    seatOfThread(threadId: string): { botId: string; companyId: string | null } | null {
+      const row = db.prepare("SELECT bot_id, company_key FROM threads WHERE thread_id = ?").get(threadId) as { bot_id: string; company_key: string } | undefined;
+      return row ? { botId: row.bot_id, companyId: row.company_key === "factory" ? null : row.company_key } : null;
+    },
+
     threadOf(botId: string, companyId: string | null): string | null {
       const row = db.prepare("SELECT thread_id FROM threads WHERE bot_id = ? AND company_key = ?").get(botId, companyId ?? "factory") as { thread_id: string } | undefined;
       return row ? row.thread_id : null;

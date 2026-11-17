@@ -18,7 +18,7 @@ const history = () => {
 describe("cofactory eval harness", () => {
   it("passes on the real truth layer", async () => {
     const card = await runSuites(FOUNDATION_SUITES);
-    expect(card.suites.map((suite) => [suite.name, suite.pass])).toEqual([["claims", true], ["evidence-classes", true], ["arms-length", true]]);
+    expect(card.suites.map((suite) => [suite.name, suite.pass])).toEqual([["claims", true], ["evidence-classes", true], ["arms-length", true], ["traceability", true]]);
     expect(card.pass).toBe(true);
   });
 
@@ -54,6 +54,16 @@ describe("cofactory eval harness", () => {
     expect((await runSuites([steady], { historyFile: file })).pass).toBe(true);
   });
 
+  it("catches a decision whose evidence points at nothing, and one allowed with no evidence", async () => {
+    const { traceProblem } = await import("../observe/trace.ts");
+    const deps = { book: { authorization: () => null, entries: () => [], company: () => null }, truth: { claimCheck: () => null, event: () => null }, runtime: null } as unknown as Parameters<typeof traceProblem>[0];
+    const cost = { companyShadowCents: 0, companySpentCents: 0, companyAvailableCents: 0, sessionShadowCents: null };
+    const base = { seq: 1, id: "d", at: 0, companyId: "c", sessionId: null, actor: "ceo:x", reason: "to market", cost };
+    expect(traceProblem(deps, { ...base, kind: "stage.advance", verdict: "allowed", evidence: [{ type: "external_event", id: "gone", externalId: "gone", evidenceClass: "urgent" }] })).toMatch(/does not resolve/);
+    expect(traceProblem(deps, { ...base, kind: "spend.capture", verdict: "allowed", evidence: [] })).toBe("allowed with no evidence");
+    expect(traceProblem(deps, { ...base, kind: "stage.advance", verdict: "allowed", reason: "to design", evidence: [] })).toBeNull();
+  });
+
   it("treats false_* and *_errors metrics as lower-is-better", async () => {
     const file = history();
     const run = (falseVerified: number): Suite => ({ name: "s", run: async () => ({ name: "s", pass: true, metrics: { false_verified: falseVerified, fetch_errors: 0 }, failures: [] }) });
@@ -65,6 +75,6 @@ describe("cofactory eval harness", () => {
     const card = await runSuites([{ name: "boom", run: async () => { throw new Error("fixture missing"); } }, ...FOUNDATION_SUITES]);
     expect(card.pass).toBe(false);
     expect(card.suites[0]).toMatchObject({ name: "boom", pass: false, failures: ["suite crashed: fixture missing"] });
-    expect(card.suites).toHaveLength(4);
+    expect(card.suites).toHaveLength(5);
   });
 });

@@ -21,6 +21,8 @@ export const CLAIM_VERDICTS = ["verified", "missing", "unreachable", "unverifiab
 export type ClaimVerdict = (typeof CLAIM_VERDICTS)[number];
 
 export interface ClaimCheck {
+  /** The check's row in the evidence store, so a decision can point at it. */
+  checkId?: number;
   url: string;
   quote: string | null;
   verdict: ClaimVerdict;

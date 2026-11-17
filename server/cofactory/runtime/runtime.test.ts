@@ -33,15 +33,19 @@ function rig(policy: Partial<RuntimePolicy> = {}) {
   const workspaces = createWorkspaces(join(dir, "companies"));
   const starts: Start[] = [];
   const interrupted: string[] = [];
+  let busyStarts = 0;
   let threads = 0;
   const turns: TurnPort = {
     threadFor: (botId) => `thread-${botId}-${++threads}`,
-    start: async (botId, threadId, prompt, onSettled) => { starts.push({ botId, threadId, prompt, onSettled }); },
+    start: async (botId, threadId, prompt, onSettled) => {
+      if (busyStarts > 0) { busyStarts--; throw new Error("this thread is already working: interrupt it first"); }
+      starts.push({ botId, threadId, prompt, onSettled });
+    },
     interrupt: async (_botId, threadId) => { interrupted.push(threadId); },
   };
   const open = () => {
     const store = openRuntimeStore(join(dir, "runtime.db"), now);
-    const sessions = createSessions({ store, book, workspaces, turns, now, policy });
+    const sessions = createSessions({ store, book, workspaces, turns, now, policy, defer: (work) => { work(); } });
     const scheduler = createScheduler({ book, truth, store, sessions, now });
     return { store, sessions, scheduler };
   };
@@ -73,6 +77,7 @@ function rig(policy: Partial<RuntimePolicy> = {}) {
     dir, book, truth, workspaces, starts, interrupted, companyId, ceo, builder, lead, tool, settle, finishWork,
     get store() { return parts.store; }, get sessions() { return parts.sessions; }, get scheduler() { return parts.scheduler; },
     tick: (ms: number) => { at += ms; },
+    busy: (times: number) => { busyStarts = times; },
     now,
     restart: async () => { await parts.sessions.drain(); parts.store.close(); parts = open(); },
   };
@@ -110,6 +115,20 @@ describe("cofactory sessions", () => {
     expect(readFileSync(join(r.workspaces.dirOf(r.companyId), "JOURNAL.md"), "utf8")).toContain("- Did: checked the offer page");
     const log = execFileSync("git", ["log", "--format=%s"], { cwd: r.workspaces.dirOf(r.companyId), encoding: "utf8" });
     expect(log.split("\n")[0]).toMatch(/^session [0-9a-f]{8} ceo completed$/);
+  });
+
+  it("tries a round again while its conversation is still winding down, and gives up after the retries", async () => {
+    const r = rig();
+    const started = await request(r);
+    if ("refused" in started) throw new Error(started.refused);
+    r.busy(2);
+    await r.settle(null);
+    expect(r.starts).toHaveLength(2);
+    expect(r.store.session(started.session.id)).toMatchObject({ status: "running", rounds: 2 });
+    expect(r.store.sessionEvents(started.session.id).filter((event) => event.type === "start_retry")).toHaveLength(2);
+    r.busy(99);
+    await r.settle(null);
+    expect(r.store.session(started.session.id)).toMatchObject({ status: "interrupted", stopReason: "the turn could not start: this thread is already working: interrupt it first" });
   });
 
   it("stops a seat that only acknowledges, and records that it never journaled", async () => {

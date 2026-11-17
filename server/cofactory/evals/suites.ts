@@ -6,6 +6,14 @@ import type { ArmsLengthContext, ClaimCheck, ClaimVerdict, EventKind, EvidenceCl
 import { guardedGet, type Answer } from "../../link-preview/net.ts";
 import { armsLength, armsLengthPayers, classifyEvent } from "../truth/classify.ts";
 import { openTruth, type PageFetcher } from "../truth/store.ts";
+import { openBook } from "../book.ts";
+import { createObserver } from "../observe/observer.ts";
+import { openObserveStore } from "../observe/store.ts";
+import { traceProblem } from "../observe/trace.ts";
+import { createSessions } from "../runtime/sessions.ts";
+import { openRuntimeStore } from "../runtime/store.ts";
+import { createWorkspaces } from "../runtime/workspace.ts";
+import { runTool } from "../tools.ts";
 import type { Suite } from "./harness.ts";
 
 const FIXTURES = new URL("./fixtures/", import.meta.url);
@@ -125,4 +133,82 @@ export function armsLengthSuite(check: typeof armsLength = armsLength): Suite {
   };
 }
 
-export const FOUNDATION_SUITES: readonly Suite[] = [claimSuite(), evidenceClassSuite(), armsLengthSuite()];
+
+
+const GATE_TOOLS = new Set(["cofactory_authorize_spend", "cofactory_capture_spend", "cofactory_void_spend", "cofactory_advance_stage", "cofactory_launch_company", "cofactory_top_up", "cofactory_kill_company", "cofactory_end_session"]);
+
+/**
+ * Traceability: a scripted factory run through the real tools, then every gate decision is checked. Each gate tool
+ * call must have filed exactly one decision, and each decision must carry a cost snapshot and evidence that resolves.
+ */
+export function traceabilitySuite(): Suite {
+  return {
+    name: "traceability",
+    async run() {
+      const dir = mkdtempSync(join(tmpdir(), "cofactory-eval-trace-"));
+      const book = openBook(join(dir, "cofactory.db"), { policy: { maxLiveCompanies: 2 } });
+      const truth = openTruth(join(dir, "evidence"), { fetch: fixtureFetcher });
+      const store = openObserveStore(join(dir, "observe.db"));
+      const runtime = openRuntimeStore(join(dir, "runtime.db"));
+      const observe = createObserver({ store, book });
+      const sessions = createSessions({ store: runtime, book, workspaces: createWorkspaces(join(dir, "companies"), { git: false }), turns: { threadFor: () => "t", start: async () => {}, interrupt: async () => {} } });
+      const failures: string[] = [];
+      try {
+        book.deposit(20_000, "owner");
+        const lead = { botId: "lead", role: "lead" as const, companyId: null };
+        book.seat(lead);
+        const call = (seat: Parameters<typeof runTool>[0]["seat"], name: string, args: unknown) =>
+          runTool({ book, truth, seat, actor: `${seat.role}:eval`, observe, sessions, session: runtime.liveFor(seat.botId) }, name, args);
+        const launched = await call(lead, "cofactory_launch_company", { name: "Tender Watch", brief: "HVAC tender digests", cap_cents: 4_000 });
+        await call(lead, "cofactory_launch_company", { name: "Too Small", brief: "x", cap_cents: 100 });
+        const companyId = (launched.structuredContent as { company: { id: string } }).company.id;
+        const ceo = { botId: "ceo", role: "ceo" as const, companyId };
+        const builder = { botId: "builder", role: "builder" as const, companyId };
+        book.seat(ceo);
+        book.seat(builder);
+        await sessions.request({ companyId, botId: "ceo", kind: "operating", trigger: "eval", objective: "o", doneWhen: "d" });
+        const held = await call(builder, "cofactory_authorize_spend", { category: "infra", vendor: "porkbun", cents: 1_200, purpose: "domain" });
+        const holdId = (held.structuredContent as { hold: { id: string } }).hold.id;
+        await call(builder, "cofactory_capture_spend", { hold_id: holdId, receipt: "inv-1" });
+        await call(builder, "cofactory_authorize_spend", { category: "distribution", vendor: "ads", cents: 500, purpose: "ads" });
+        const second = await call(builder, "cofactory_authorize_spend", { category: "cogs", vendor: "api", cents: 300, purpose: "api" });
+        await call(builder, "cofactory_void_spend", { hold_id: (second.structuredContent as { hold: { id: string } }).hold.id });
+        await call(ceo, "cofactory_advance_stage", { to: "market", evidence: { kind: "path_live", source: "webhook", ref: "https://fixtures.cofactory.test/gone" } });
+        await call(ceo, "cofactory_advance_stage", { to: "market", evidence: { kind: "path_live", source: "webhook", ref: "https://fixtures.cofactory.test/pricing" } });
+        truth.recordEvent({ source: "mailbox", externalId: "cold", companyId, kind: "reply", occurredAt: 1, text: "keep me posted" });
+        truth.recordEvent({ source: "mailbox", externalId: "hot", companyId, kind: "reply", occurredAt: 2, text: "How much for our office? Send me an invoice." });
+        await call(ceo, "cofactory_advance_stage", { to: "sell", evidence: { kind: "selling_signal", source: "inbound", ref: "cold" } });
+        await call(ceo, "cofactory_advance_stage", { to: "sell", evidence: { kind: "selling_signal", source: "inbound", ref: "hot" } });
+        book.recordRevenue({ companyId, cents: 9_900, receipt: "ch_1" }, "stripe");
+        await call(ceo, "cofactory_advance_stage", { to: "manage" });
+        await call(ceo, "cofactory_end_session", { outcome: "done", summary: "no journal yet" });
+        await call(ceo, "cofactory_journal", { did: "advanced to manage" });
+        await call(ceo, "cofactory_end_session", { outcome: "done", summary: "advanced" });
+        await call(lead, "cofactory_top_up", { company_id: companyId, cents: 1_000 });
+        await call(lead, "cofactory_kill_company", { company_id: companyId, reason: "metric", why: "eval over" });
+
+        const decisions = store.decisions();
+        const gateCalls = store.toolCalls().filter((record) => GATE_TOOLS.has(record.tool));
+        let traceable = 0;
+        for (const decision of decisions) {
+          const problem = traceProblem({ book, truth, runtime }, decision);
+          if (problem) failures.push(`${decision.kind} ${decision.verdict}: ${problem}`);
+          else traceable++;
+        }
+        const missing = Math.abs(gateCalls.length - decisions.length);
+        if (missing) failures.push(`${gateCalls.length} gate tool calls but ${decisions.length} decisions`);
+        const refused = decisions.filter((decision) => decision.verdict === "refused").length;
+        const fraction = decisions.length ? traceable / decisions.length : 0;
+        return {
+          name: "traceability", pass: decisions.length >= 15 && fraction === 1 && missing === 0 && refused >= 5,
+          metrics: { traceable: fraction, decisions: decisions.length, refused, missing_decision_errors: missing }, failures,
+        };
+      } finally {
+        store.close(); runtime.close(); truth.close(); book.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  };
+}
+
+export const FOUNDATION_SUITES: readonly Suite[] = [claimSuite(), evidenceClassSuite(), armsLengthSuite(), traceabilitySuite()];

@@ -31,7 +31,12 @@ export interface SessionDeps {
   now?: () => number;
   policy?: Partial<RuntimePolicy>;
   log?: (line: string) => void;
+  /** Runs `work` after `ms`; tests pass one that runs it at once. */
+  defer?: (work: () => void, ms: number) => void;
 }
+
+/** Waits before each new try at starting a round the conversation was not ready for. */
+const START_RETRY_MS = [500, 1_000, 2_000, 4_000, 8_000, 16_000];
 
 const RESTARTED = "dusk restarted while this session was running. Whatever you were doing may or may not have finished: check the real state (files, cofactory_status, the page or the inbox) before repeating any action.";
 
@@ -78,15 +83,29 @@ export function createSessions(deps: SessionDeps) {
     ].filter(Boolean).join("\n\n");
   }
 
+  const defer = deps.defer ?? ((work: () => void, ms: number) => { setTimeout(work, ms).unref?.(); });
+
   async function runRound(session: Session, prompt: string): Promise<void> {
     store.roundStarted(session.id);
-    const round = (store.session(session.id)?.rounds ?? 0);
+    await startRound(session, store.session(session.id)?.rounds ?? 0, prompt, 0);
+  }
+
+  /** A turn's settle can arrive while its conversation is still winding down, so a refused start is tried again shortly. */
+  async function startRound(session: Session, round: number, prompt: string, attempt: number): Promise<void> {
     try {
       await turns.start(session.botId, session.threadId, prompt, (result) => {
         void track(settled(session.id, round, result)).catch((error) => log(`cofactory: settling session ${session.id.slice(0, 8)} failed: ${error instanceof Error ? error.message : String(error)}`));
       });
     } catch (error) {
-      await finish(session.id, "interrupted", `the turn could not start: ${error instanceof Error ? error.message : String(error)}`);
+      const why = error instanceof Error ? error.message : String(error);
+      const live = store.session(session.id);
+      if (!live || live.status !== "running" || live.rounds !== round) return;
+      if (attempt < START_RETRY_MS.length) {
+        store.note(session.id, "start_retry", { attempt: attempt + 1, why });
+        defer(() => { void track(startRound(session, round, prompt, attempt + 1)); }, START_RETRY_MS[attempt]!);
+        return;
+      }
+      await finish(session.id, "interrupted", `the turn could not start: ${why}`);
     }
   }
 

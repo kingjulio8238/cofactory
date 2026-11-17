@@ -127,9 +127,9 @@ export function openTruth(dir: string, options: { fetch?: PageFetcher; now?: () 
         else if (snap.textLength < THIN_PAGE_CHARS) check = { url: input.url, quote, verdict: "unverifiable", reason: `only ${snap.textLength} characters of text: likely rendered by script`, snapshotId: snap.id };
         else check = { url: input.url, quote, verdict: "missing", reason: found.reason, snapshotId: snap.id };
       }
-      db.prepare("INSERT INTO claim_checks (at, subject, url, quote, verdict, reason, snapshot_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      const { lastInsertRowid } = db.prepare("INSERT INTO claim_checks (at, subject, url, quote, verdict, reason, snapshot_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
         .run(now(), input.subject ?? null, check.url, check.quote, check.verdict, check.reason, check.snapshotId);
-      return check;
+      return { ...check, checkId: Number(lastInsertRowid) };
     },
 
     /** Records an event once per (source, externalId); a repeat returns the first record unchanged. */
@@ -147,6 +147,21 @@ export function openTruth(dir: string, options: { fetch?: PageFetcher; now?: () 
         "INSERT INTO external_events (id, source, external_id, company_id, kind, occurred_at, received_at, payer_email, amount_cents, refund_of, test_mode, text, evidence_class) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       ).run(event.id, event.source, event.externalId, event.companyId, event.kind, event.occurredAt, event.receivedAt, event.payerEmail, event.amountCents, event.refundOf, event.testMode ? 1 : 0, event.text, event.evidenceClass);
       return { event, duplicate: false };
+    },
+
+    claimCheck(checkId: number): (ClaimCheck & { at: number; subject: string | null }) | null {
+      const row = db.prepare("SELECT * FROM claim_checks WHERE seq = ?").get(checkId) as Record<string, unknown> | undefined;
+      if (!row) return null;
+      return {
+        checkId, at: Number(row.at), subject: row.subject === null ? null : String(row.subject), url: String(row.url),
+        quote: row.quote === null ? null : String(row.quote), verdict: row.verdict as ClaimCheck["verdict"], reason: String(row.reason),
+        snapshotId: row.snapshot_id === null ? null : String(row.snapshot_id),
+      };
+    },
+
+    event(id: string): ExternalEvent | null {
+      const row = db.prepare("SELECT * FROM external_events WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+      return row ? rowToEvent(row) : null;
     },
 
     events(filter: { companyId?: string } = {}): ExternalEvent[] {
