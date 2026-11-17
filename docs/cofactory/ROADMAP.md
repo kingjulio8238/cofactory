@@ -841,6 +841,45 @@ the ops board ("cloud gate: not yet" / "READY"). All three must hold:
 Also needed, but not measurable from the records: the backend's licence (PolyForm Noncommercial) is settled with its
 holder before Cofactory sells hosting.
 
+## From here (2026-11-17)
+
+**The goal:** prove the factory makes the owner money, then share it with friends. Each stage starts when the one before it
+passes its gate.
+
+**A: First dollar.** This is the P3 and P4 exit gate.
+1. **Finish the live run.** Take the first search through dossiers to the lead's first launch request, approved in the
+   app, and fix what it exposes.
+2. **Go live in the app:**
+   - the rails checklist with live checks (`pnpm cofactory:rails-check` behind a screen);
+   - Stripe's webhook created by the app;
+   - a preview of the offer page and the first emails;
+   - an **Arm** button in the Factory tab, in place of the `curl` call.
+3. **The owner's rails:** a domain and mailbox, Stripe, a postal address, and a public address for the intake.
+4. **The first real sprint:** a paying customer, delivered and rehearsed, or a clean close with its post-mortem.
+
+*Gate:* one company past the first-dollar gate.
+
+**B: Safe to leave running:**
+- sessions survive restarts with their journals;
+- what needs the owner reaches them off the Mac, by email or notification digest, until there is a Cofactory phone app;
+- scores are calibrated against real outcomes.
+
+*Gate:* a week of unattended running with no lost session and every approval answered.
+
+**C: Ready for friends:**
+- the app's own name, bundle id and release signing;
+- its own account service, or no account;
+- location pre-fill and the optional edge step;
+- dusk's remaining screens and offers replaced.
+
+*Gate:* a friend installs it, opens a factory, and reaches a launch request without help.
+
+**D: Scale (X2):**
+- several owners and factories;
+- per-company virtual cards;
+- the cloud, behind the cloud gate;
+- the backend's licence settled before hosting is sold.
+
 ## Progress log
 
 - **2026-11-17:** F0 done. Roadmap approved. F1 and F2 started.
