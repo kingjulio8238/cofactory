@@ -51,6 +51,7 @@ const VARIANTS: Variant[] = [
   { id: "one-site-voices", edit: (body) => { body.pains.forEach((pain, index) => { pain.url = `https://forum-site.test/thread-${index + 1}`; pain.quote = `reconciling the remits by hand eats a whole weekend every month for store number ${index + 1}`; }); }, pass: false },
   { id: "news-not-voices", edit: (body) => { body.pains.forEach((pain) => { pain.sourceType = "news"; }); }, pass: false },
   { id: "vague-plan", edit: (body) => { body.firstTen.steps = "marketing"; body.failureModes = ["competition"]; }, pass: false },
+  { id: "job-ads-as-pain", edit: (body) => { body.pains.forEach((pain) => { pain.sourceType = "job_board"; }); }, pass: false },
   { id: "wrong-spend-amount", edit: (body) => { body.spend[0]!.amountCents = 9_900; }, pass: false },
 ];
 

@@ -10,7 +10,9 @@ export type EvidenceLink =
   | { type: "session"; id: string }
   | { type: "signal"; id: string }
   | { type: "niche"; id: string }
-  | { type: "dossier"; id: string };
+  | { type: "dossier"; id: string }
+  | { type: "sprint"; id: string }
+  | { type: "touch"; id: string };
 
 /** What the company (and the deciding session) had spent when a decision was made, in cents. */
 export interface CostSnapshot {
@@ -24,6 +26,7 @@ export const DECISION_KINDS = [
   "stage.advance", "spend.authorize", "spend.capture", "spend.void", "company.launch", "company.top_up", "company.kill",
   "company.freeze", "company.unfreeze", "revenue.record", "session.end", "seat.change", "money.deposit", "money.reserve",
   "signal.record", "niche.propose", "niche.select", "dossier.submit", "dossier.champion",
+  "sprint.start", "sprint.add_buyer", "outreach.send", "offer.publish", "payment_link.create",
 ] as const;
 export type DecisionKind = (typeof DECISION_KINDS)[number];
 

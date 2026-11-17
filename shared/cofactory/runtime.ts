@@ -45,7 +45,7 @@ export interface JournalEntry {
   blockers: string;
 }
 
-export const ALARM_KINDS = ["stalled", "fake_work", "journal_stale", "zombie", "unstaffed", "unjournaled", "discovery_stuck"] as const;
+export const ALARM_KINDS = ["stalled", "fake_work", "journal_stale", "zombie", "unstaffed", "unjournaled", "discovery_stuck", "sprint_failed", "mail_failed"] as const;
 export type AlarmKind = (typeof ALARM_KINDS)[number];
 
 export interface Alarm {

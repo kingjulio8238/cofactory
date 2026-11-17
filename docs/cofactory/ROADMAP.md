@@ -18,8 +18,8 @@ stage's row and its section when its status changes. The rules behind the pipeli
 | Foundations | [F3 Runtime and persistence](#f3-runtime-and-persistence) | Done | A fake-engine company survives kills, restarts and a multi-day simulated run with no zombie state |
 | Foundations | [F4 Observability](#f4-observability) | Done | Every gate decision is traceable to its evidence and its cost |
 | Pipeline | [P1 Discovery](#p1-discovery) | Done | Signals 100% verified; divergence under the ceiling across 10 simulated profiles |
-| Pipeline | [P2 Dossiers and scoring](#p2-dossiers-and-scoring) | Not started | Claim verifier ≥ 95%; adversarial Q&A; post-cutoff rediscovery baseline |
-| Pipeline | [P3 Offer and validation](#p3-offer-and-validation) | Not started | One real sprint completed inside its cap, gates fed by real events |
+| Pipeline | [P2 Dossiers and scoring](#p2-dossiers-and-scoring) | Done (rediscovery baseline running) | Claim verifier ≥ 95%; adversarial Q&A; post-cutoff rediscovery baseline |
+| Pipeline | [P3 Offer and validation](#p3-offer-and-validation) | Built; the real sprint waits on the owner's rails | One real sprint completed inside its cap, gates fed by real events |
 | Pipeline | [P4 First dollar](#p4-first-dollar) | Not started | First arm's-length dollar, or a clean, post-mortemed kill |
 | Product | [X1 Owner experience](#x1-owner-experience) | Not started | The owner runs a full cycle from cards alone |
 | Product | [X2 Hard rails and scale](#x2-hard-rails-and-scale) | Not started | Calibration and divergence hold across ≥ 3 owner profiles |
@@ -506,8 +506,111 @@ The ten hard vetoes:
 
 - Breaking the buyer-count check, the Q&A's evidence check or the price-ratio veto each fails its suite.
 
+**Live dossier runs (2026-11-17), on a real model:**
+
+*Ohio cannabis compliance (DCC training records and SOP upkeep):*
+- **v1** failed. All 22 claims verified, but it reused job-ad URLs, leaving 2 distinct practitioner pages. It was
+  priced at $1,500 a month, over the card limit, and the scout flagged regulated claims itself.
+- **v2**, 30 minutes later, was shortlisted with a score of 69.7:
+  - the price dropped to $299 a month against a verified $1,000-a-month consultancy alternative;
+  - the offer was narrowed to documentation upkeep, which cleared the regulated-claims flag;
+  - 5 distinct practitioner pages.
+- **The catch:** all 8 "pain" quotes were job-ad boilerplate ("Must be 21+, pass a background check…"). They are on
+  their pages, so they verified, but they are not buyers describing pain. The verifier checked that each quote exists,
+  not that it shows pain.
+- **The fix:** practitioner pain must come from at least 2 kinds of buyer-voice source, and at most half of the pages
+  may be job ads, which show spend, not pain.
+  - The `dossier-verifier` suite gained a `job-ads-as-pain` case.
+  - Re-verifying the live v2 against real pages under the new rule fails it for exactly that reason, which is the right
+    outcome: in this niche the scout found no buyer complaints.
+
+*Consignment-shop payout reconciliation and W-9/1099 handling:*
+- This dossier was researched by the rediscovery factory's scout.
+- It passed on v3, after the scout narrowed the offer to "mechanical execution only" to clear a licensed-advice veto
+  and found a fifth genuine practitioner page.
+
+**Known gap:** risk flags are declared by the scout itself. A model can clear a veto by re-scoping honestly or by
+under-declaring. A second-seat review or a rule check on the flags is a candidate for the next iteration.
+
+**Runtime fixes the live runs forced:**
+- Startup recovery now leaves alone sessions the same process started. A session started right after boot was being
+  re-entered while its first turn still ran.
+- A busy conversation is retried for about 5 minutes, then the stale turn is interrupted. After a hard kill, dusk
+  resumes the cut turn by itself and holds the conversation for minutes.
+- Only sessions that actually ran a round count toward an allowance. Two sessions that never started had used up a
+  niche's dossier allowance.
+
+**Rediscovery:**
+- The runner sets a neutral profile from each target's domain ("what people in <domain> pay to have solved"). The
+  first version said "back-office work in <domain>", which steered the scout; only neutral-profile runs are scored.
+- `COFACTORY_DOSSIERS_PER_BATCH=0` keeps dossier work out of rediscovery runs.
+- The target set has 5 businesses with revenue verified by their payment providers, launched July–October 2026: small
+  revenue, and 3 of the 5 only moderately niche.
+- Baseline results: see the progress log.
+
 ### P3 Offer and validation
-Offer page, payment link, outreach on any channel inside send caps, and a validation sprint of 7 days or less.
+
+**Why:** this is the first time real buyers judge us. Gates read only what they do: replies, form submissions,
+payments.
+
+| Piece | Where | What it does |
+|---|---|---|
+| Sprints | `server/cofactory/validation/sprints.ts` (`<data>/cofactory-sprints.db`) | One company, one week, named buyers. Pass/fail rule below. |
+| Buyer list | `addTarget` | Each buyer needs a page proving their contact route is public. For email the exact address must appear on that page (`truth.checkContains`). No bought lists, no guessed addresses. |
+| Gate | `authorizeTouch` | Refuses suppressed buyers; enforces caps of 20 a day and 60 a sprint, and 2 contacts per buyer at least 3 days apart. The opt-out line goes on first contact. |
+| Suppression | `suppress` | Unsubscribes, bounces and rejections, permanent across every company on the server; a database trigger forbids deletion |
+| Outreach | `server/cofactory/validation/outreach.ts` | Detail below |
+| Intake | `server/cofactory/validation/intake.ts`, on dusk's public webhook receiver via an `IngressDoor` | Detail below |
+| Offer page | `server/cofactory/validation/offer.ts` | A self-contained page with a payment button, a request form and the postal address and contact the law asks for. Served from the public intake, so the page and its form share one origin. |
+| Payment links | `createPaymentLink` | Stripe product, price and link, tagged with the company |
+| Rails | `server/cofactory/validation/rails.ts` (`<data>/cofactory-rails.json`, 0600) | Each company's mailbox, Stripe keys, form token and public URL. The owner sets them with `POST /api/cofactory/companies/:id/rails`. Responses show which rails are connected, never the secrets. |
+| Tools | `cofactory_start_sprint` (CEO), `cofactory_add_buyer`, `cofactory_send_outreach`, `cofactory_sprint_status`, `cofactory_publish_offer`, `cofactory_payment_link` | Each one files a traceable decision |
+| Upkeep | every tick | Polls each running sprint's mailbox and settles the sprint; raises `sprint_failed` or `mail_failed` |
+| dusk changes | `server/email/client.ts`; `server/index.ts` | `sendMessage` accepts custom headers. A seated bot no longer gets dusk's own email tools or their prompt section, so every outreach email passes the Cofactory gate. |
+
+**Sprint rule:** a sprint passes on one committed (paid, live-mode) event, or on urgent replies from 3 different
+buyers. It fails when the week runs out.
+
+**Outreach:**
+- Mail is sent from the company's own mailbox, connected in dusk over IMAP/SMTP, by the server and never by a bot turn.
+- It carries a `List-Unsubscribe` header, and each send is logged with its Message-ID.
+- Polling turns replies into evidence, matched to the message they answer.
+- A "stop" or a bounce is suppressed at once, for good.
+
+**Intake:**
+- `POST /hooks/cofactory/stripe/<company>` checks Stripe's HMAC signature within a 5-minute tolerance. A paid Checkout
+  session becomes a payment; a refunded charge becomes a refund of that payment.
+- `POST /hooks/cofactory/form/<company>/<token>` takes offer-page forms. The token is checked in constant time,
+  there is a honeypot field, a submission is recorded once per sender, message and day, and the buyer is redirected to
+  a thank-you page.
+- `GET /hooks/cofactory/offer/<company>` serves the offer page with a strict CSP.
+
+**Evals:**
+- The `outreach-gate` suite has 20 cases:
+  - guessed addresses and unverifiable pages refused;
+  - opt-out on first contact only;
+  - the gap between contacts, suppression, and the daily, sprint and time-box caps;
+  - forged versus signed Stripe deliveries;
+  - test-mode payments marked.
+- Result: 20/20, `false_allowed` = 0.
+
+**Proof:**
+- `validation.test.ts`, 4 tests: the buyer list, the gate and caps, replies with stops, bounces and the 3-buyer pass,
+  and payment versus time box.
+- `intake.test.ts`, 4 tests: signatures, event mapping, HTTP forgery and the form.
+- **`validation.e2e.test.ts` on a real dusk server:**
+  1. The CEO's engine starts a sprint and publishes the offer, which is then served from the public webhook port.
+  2. It lists a buyer whose page verifies.
+  3. Its outreach is refused because no mailbox is connected.
+  4. A forged Stripe webhook is rejected; a signed one records the payment and passes the sprint.
+  5. No decision is untraceable.
+
+**What the exit gate still needs (the owner's identity and legal gates):**
+- **A mailbox for the company.** A dedicated domain with SPF, DKIM and DMARC, connected in dusk.
+- **A Stripe account.** A restricted key that can create payment links, plus a webhook endpoint pointed at
+  `/hooks/cofactory/stripe/<company>` with its signing secret.
+- **A public HTTPS address for the webhook port**, for example a Cloudflare tunnel or a reverse proxy.
+- **The owner's go-ahead before any real person is contacted.**
 
 ### P4 First dollar
 Concierge fulfilment, invoices, the bus-factor test, and post-mortems that feed scoring.

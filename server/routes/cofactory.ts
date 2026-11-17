@@ -17,6 +17,8 @@ import type { RuntimeStore } from "../cofactory/runtime/store.ts";
 import type { Truth } from "../cofactory/truth/store.ts";
 import type { Discovery } from "../cofactory/discovery/discovery.ts";
 import type { Dossiers } from "../cofactory/dossier/dossiers.ts";
+import type { Rails } from "../cofactory/validation/rails.ts";
+import type { Sprints } from "../cofactory/validation/sprints.ts";
 import { PROFILE_FIELDS } from "../../shared/cofactory/discovery.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
@@ -27,6 +29,7 @@ const seat = z.union([
 ]);
 const COMPANY_ACTION = /^\/api\/cofactory\/companies\/([\w-]+)\/(freeze|unfreeze|kill|wake)$/;
 const TRACE = /^\/api\/cofactory\/trace\/(session|company)\/([\w-]+)$/;
+const RAILS = /^\/api\/cofactory\/companies\/([\w-]+)\/rails$/;
 const DAY_MS = 24 * 60 * 60_000;
 
 export interface CofactoryRouteDeps {
@@ -36,6 +39,7 @@ export interface CofactoryRouteDeps {
   observe: () => Observer;
   discovery: () => Discovery;
   dossiers: () => Dossiers;
+  validation: () => { sprints: Sprints; rails: Rails };
   traceDeps: () => TraceDeps;
   tick: () => Promise<void>;
   owner: (auth: RequestAuth) => boolean;
@@ -119,6 +123,15 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
           niches: discovery.store.niches(status ? { batchId: status.batch.id } : {}), signals: discovery.store.signals(status ? { batchId: status.batch.id } : {}),
         });
       }
+      const railsPath = RAILS.exec(path);
+      if (railsPath) return book.company(railsPath[1]!) ? json(res, 200, { rails: deps.validation().rails.summary(railsPath[1]!) }) : json(res, 404, { error: "no such company" });
+      if (path === "/api/cofactory/sprints") {
+        const { sprints } = deps.validation();
+        const ids = companyParam ? [companyParam] : book.companies().map((company) => company.id);
+        return json(res, 200, { sprints: ids.map((id) => sprints.running(id)).filter((sprint) => sprint !== null).map((sprint) => ({
+          sprint, evidence: sprints.evidence(sprint!.id), buyers: sprints.targets(sprint!.id).length, contacts: sprints.touches(sprint!.id).length,
+        })) });
+      }
       if (path === "/api/cofactory/dossiers") return json(res, 200, { niches: deps.dossiers().board(), stillNeedDossier: deps.dossiers().wanted() });
       if (path.startsWith("/api/cofactory/dossiers/")) {
         const dossier = deps.discovery().store.dossier(path.slice("/api/cofactory/dossiers/".length));
@@ -170,6 +183,20 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
       for (const id of selected) observe.decide({ companyId: null, session: null, actor: "owner", kind: "niche.select", verdict: "allowed", reason: "selected for a dossier from the closed batch", evidence: [{ type: "niche", id }] });
       void deps.tick();
       return json(res, 200, { ...result, selectedForDossiers: selected });
+    }
+    const railsPost = RAILS.exec(path);
+    if (railsPost) {
+      const companyId = railsPost[1]!;
+      if (!book.company(companyId)) return json(res, 404, { error: "no such company" });
+      const input = parse(z.object({
+        mailbox: z.string().email().nullable().optional(), stripeSecretKey: z.string().regex(/^(sk|rk)_(test|live)_[\w]+$/).nullable().optional(),
+        stripeWebhookSecret: z.string().regex(/^whsec_[\w]+$/).nullable().optional(), publicHooksUrl: z.string().url().regex(/^https:\/\//).nullable().optional(),
+      }));
+      if (!input) return;
+      const { rails } = deps.validation();
+      rails.set(companyId, Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)));
+      record(companyId, "rails", Object.keys(input).filter((key) => input[key as keyof typeof input] !== undefined).join(", "));
+      return json(res, 200, { ok: true, rails: rails.summary(companyId) });
     }
     if (path === "/api/cofactory/discovery/abandon") {
       const result = deps.discovery().abandonBatch();

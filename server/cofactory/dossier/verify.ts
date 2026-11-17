@@ -62,6 +62,11 @@ export async function verifyDossier(truth: Truth, body: DossierBody, policy: Dos
   const practitionerSites = new Set([...practitionerPages].map(siteOf));
   if (practitionerPages.size < policy.minPractitioners) structural.push(`${practitionerPages.size} practitioner pages; needs ${policy.minPractitioners}`);
   if (practitionerSites.size < 2) structural.push("practitioner quotes all come from one site");
+  const voices = body.pains.filter((pain, index) => ok("pain", index) && BUYER_VOICE_SOURCES.includes(pain.sourceType));
+  const voiceKinds = new Set(voices.map((pain) => pain.sourceType));
+  if (voiceKinds.size < 2) structural.push(`practitioner quotes come from one kind of source (${[...voiceKinds].join(", ") || "none"}); pain needs buyers talking (forums, reviews, Q&A), not only one kind of page`);
+  const jobPages = new Set(voices.filter((pain) => pain.sourceType === "job_board").map((pain) => pain.url)).size;
+  if (practitionerPages.size && jobPages / practitionerPages.size > 0.5) structural.push(`${jobPages} of ${practitionerPages.size} practitioner pages are job ads; job ads show spend, not pain, so at most half may be job ads`);
   if (!body.spend.some((_, index) => ok("spend", index))) structural.push("no verified line of what buyers spend today");
   if (body.failureModes.filter((mode) => mode.trim().length > 15).length < policy.minFailureModes) structural.push(`needs ${policy.minFailureModes} specific failure modes`);
   if (body.gap.why.trim().length < 60 || body.gap.hiddenReasonsRuledOut.trim().length < 40) structural.push("the gap and the hidden reasons it rules out must be specific");

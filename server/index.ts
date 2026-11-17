@@ -2461,7 +2461,7 @@ const cofactory = createCofactoryHost({ dataDir: DATA_DIR, proxy: { command: pro
     interrupt: async (botId: string, threadId: string) => { cancelDirectTurnDispatch(botId, threadId); revokeInternalCapabilitiesForThread(threadId); await runningTurnInstance(botForThread(botId, threadId), threadId)?.adapter.interruptTurn(threadId); },
   } }),
   createBot: async ({ name, instructions, section }) => { const bot = store.createBot({ name, soul: instructions, section, modelSelection: await defaultSelection() }, { seedMessages: false }); store.patchBot(bot.id, { approvalMode: "full" }); return bot.id; },
-  policy: cofactoryPolicyFromEnv(process.env), ...(Number(process.env.COFACTORY_TICK_MS) > 0 ? { tickMs: Number(process.env.COFACTORY_TICK_MS) } : {}) });
+  policy: cofactoryPolicyFromEnv(process.env), email: emailService, ...(Number(process.env.COFACTORY_TICK_MS) > 0 ? { tickMs: Number(process.env.COFACTORY_TICK_MS) } : {}) });
 const emailIntegration = (bot: BotRecord, turn: { threadId: string; generation: string }) => emailHost.integration(bot, () => mintInternalCapability({ botId: bot.id, ...turn, kind: "email", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 }), `http://127.0.0.1:${PORT}`);
 
 let browserEngineInstall: Promise<void> | null = null;
@@ -9249,7 +9249,7 @@ async function beginTurn(
         if (data) integrations.data = data;
         const seat = cofactory.integration(bot.id, { threadId, generation: dispatchClaimId }); if (seat) integrations.cofactory = seat;
       }
-      if (liveBot && instance.adapter.capabilities.emailMcp === true) { const mail = emailIntegration(liveBot, { threadId, generation: dispatchClaimId }); if (mail) integrations.email = mail; }
+      if (liveBot && instance.adapter.capabilities.emailMcp === true && !cofactory.seated(liveBot.id)) { const mail = emailIntegration(liveBot, { threadId, generation: dispatchClaimId }); if (mail) integrations.email = mail; }
       const phone = liveBot && instance.adapter.capabilities.deviceMcp === true ? phones.integration(liveBot, { threadId, generation: dispatchClaimId }) : null;
       if (phone) integrations.device = phone;
       const mountedComputer = surfaceOfComputerKind(computerKind);
@@ -9328,7 +9328,7 @@ async function beginTurn(
         { id: "mcp", label: "MCP servers", text: mcpPrompt(bot, integrations.custom ?? {}) }, { id: "to-connect", label: "Connections to make", text: cloudConnections.prompt(liveBot ?? bot) + teamConnections.prompt(threadId, dispatchClaimId, integrations) },
         { id: "browser", label: "Browser", text: integrations.browser ? browserPromptFor(bot, Boolean(integrations.agents)) : "" },
         { id: "data", label: "Data", text: integrations.data ? BUILT_IN_DATA_SYSTEM_PROMPT : "" }, { id: "cofactory", label: "Cofactory", text: integrations.cofactory ? cofactory.prompt(bot.id) : "" },
-        { id: "email", label: "Email", text: instance.adapter.capabilities.emailMcp === true ? emailHost.prompt(liveBot ?? bot) : "" },
+        { id: "email", label: "Email", text: instance.adapter.capabilities.emailMcp === true && !cofactory.seated(bot.id) ? emailHost.prompt(liveBot ?? bot) : "" },
         ...phones.promptParts(liveBot ?? bot, {
           mounted: Boolean(integrations.device), offered: instance.adapter.capabilities.deviceMcp === true, turn: { botId: bot.id, threadId, generation: dispatchClaimId },
           place: phones.place(threadId, !(commsDepth > 0 || opts?.automationSource !== undefined || opts?.unattended || opts?.peerAsk || opts?.coordination)),
@@ -10438,7 +10438,7 @@ const appTriggers = createAppTriggerHost({ store, webhooks, webhookBase: () => w
 tieAutomationsToBots(store, { routines: routines!, webhooks, apps: appTriggers.manager, waits: botWaits });
 ROUTES.push(appTriggers.routes); ROUTES.unshift(createMoveFreezeRoutes({ freeze: moveFreeze, owner: (auth) => ownHome.owner(auth), automationsOff: () => switchAutomationsOff({ routines: () => routines, webhooks: () => webhooks, appEvents: () => appTriggers.manager, waits: () => botWaits }), restart: () => { restartRequested = true; gracefulShutdown(); }, busy: createMoveWaits({ bots: () => store.bots, rooms: () => store.groups, answering: (id) => watchdog.answering(id), turn: botHasActiveTurn, runs: () => routines?.listRuns() ?? [], roomWorking: (id) => { const group = store.group(id); return Boolean(group && groupIsWorking(group)); }, handoffs: () => coordinator.active(), exists: (node) => !(!node.parentId && node.groupId ? roomRootProblem(node) : roomHandoffProblem(node)), signingIn: () => providerAuthSessions.active }) }));
 // before the freeze: a frozen copy is still its owner's to delete
-ROUTES.push(createCofactoryRoutes({ books: cofactory.books, evidence: cofactory.evidence, runtime: cofactory.runtime, observe: cofactory.observe, discovery: cofactory.discovery, dossiers: cofactory.dossiers, traceDeps: cofactory.traceDeps, tick: cofactory.tick, evalHistoryFile: process.env.COFACTORY_EVAL_HISTORY || join(homedir(), ".cofactory", "evals", "history.jsonl"), owner: (auth) => auth.scopes.includes("admin") && !(auth.kind === "loopback" && auth.trust === "service"), botExists: (id) => Boolean(store.bot(id)) }));
+ROUTES.push(createCofactoryRoutes({ books: cofactory.books, evidence: cofactory.evidence, runtime: cofactory.runtime, observe: cofactory.observe, discovery: cofactory.discovery, dossiers: cofactory.dossiers, validation: cofactory.validation, traceDeps: cofactory.traceDeps, tick: cofactory.tick, evalHistoryFile: process.env.COFACTORY_EVAL_HISTORY || join(homedir(), ".cofactory", "evals", "history.jsonl"), owner: (auth) => auth.scopes.includes("admin") && !(auth.kind === "loopback" && auth.trust === "service"), botExists: (id) => Boolean(store.bot(id)) }));
 ROUTES.unshift(createStartFreshRoutes({ dataDir: DATA_DIR, owner: (auth) => ownHome.owner(auth), managed: () => CLOUD_HOME !== null || Boolean(process.env.DUSK_CLOUD_ROLE), restart: () => { restartRequested = true; gracefulShutdown(); } }));
 ROUTES.push(createLimitResetRoutes({ clock: limitClock, routines: routines!, requests: routineRequests, engineName, threadEngine: (botId, threadId) => turnSelection(botId, threadId)?.instanceId,
   threadTitle: (botId, threadId) => store.bot(botId) && !store.bot(botId)!.hidden ? store.taskByThread(botId, threadId)?.title ?? null : null,
@@ -10461,7 +10461,7 @@ let webhookIngressError: string | null = null;
 try {
   webhookIngress = await listenWebhookIngress(webhooks, {
     port: WEBHOOK_PORT, publicBaseUrl: WEBHOOK_PUBLIC_URL,
-    claimRequest: () => { cloudPower?.arrived("/hooks", {}); moveFreeze.assertTurns(); return workspaceMaintenance.request(); }, door: botApi.door,
+    claimRequest: () => { cloudPower?.arrived("/hooks", {}); moveFreeze.assertTurns(); return workspaceMaintenance.request(); }, door: async (req, res, url) => (await cofactory.intakeDoor(req, res, url)) || botApi.door(req, res, url),
   });
   const advertised = WEBHOOK_PUBLIC_URL ? ` (advertised as ${webhookIngress.baseUrl})` : "";
   console.log(`duskbot webhook receiver on http://${webhookIngress.host}:${webhookIngress.port}${advertised}`);
@@ -10947,7 +10947,7 @@ async function runClaimedGroupMemberTurn(
     if (data) integrations.data = data;
     const seat = cofactory.integration(readyBot.id, { threadId, generation: internalGeneration }); if (seat) integrations.cofactory = seat;
   }
-  if (instance.adapter.capabilities.emailMcp === true) { const mail = emailIntegration(readyBot, { threadId, generation: internalGeneration }); if (mail) integrations.email = mail; }
+  if (instance.adapter.capabilities.emailMcp === true && !cofactory.seated(readyBot.id)) { const mail = emailIntegration(readyBot, { threadId, generation: internalGeneration }); if (mail) integrations.email = mail; }
   const phone = instance.adapter.capabilities.deviceMcp === true ? phones.integration(readyBot, { threadId, generation: internalGeneration }) : null;
   if (phone) integrations.device = phone;
   const browserReadyBot = store.bot(readyBot.id);
@@ -11168,7 +11168,7 @@ async function runClaimedGroupMemberTurn(
     { id: "cloud-home", label: "My Cloud", text: CLOUD_HOME ? cloudHomePrompt(syncedFolders(DATA_DIR)) : "" },
     { id: "browser", label: "Browser", text: integrations.browser ? browserPromptFor(bot, Boolean(integrations.agents)) : "" },
     { id: "data", label: "Data", text: integrations.data ? BUILT_IN_DATA_SYSTEM_PROMPT : "" }, { id: "cofactory", label: "Cofactory", text: integrations.cofactory ? cofactory.prompt(readyBot.id) : "" },
-    { id: "email", label: "Email", text: instance.adapter.capabilities.emailMcp === true ? emailHost.prompt(readyBot) : "" },
+    { id: "email", label: "Email", text: instance.adapter.capabilities.emailMcp === true && !cofactory.seated(readyBot.id) ? emailHost.prompt(readyBot) : "" },
     ...phones.promptParts(readyBot, {
       mounted: Boolean(integrations.device), offered: instance.adapter.capabilities.deviceMcp === true,
       turn: { botId: readyBot.id, threadId, generation: internalGeneration }, place: "computer",

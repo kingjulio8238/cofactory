@@ -237,7 +237,7 @@ export async function readMessage(account: EmailAccount, guard: EmailGuard, inpu
   });
 }
 
-export interface SendInput { to: string[]; cc?: string[]; bcc?: string[]; subject: string; text: string; inReplyTo?: string; references?: string }
+export interface SendInput { to: string[]; cc?: string[]; bcc?: string[]; subject: string; text: string; inReplyTo?: string; references?: string; headers?: Record<string, string> }
 
 /** Sends as the mailbox's own address and files a copy in its Sent folder when it has one. */
 export async function sendMessage(account: EmailAccount, guard: EmailGuard, input: SendInput): Promise<{ messageId: string; accepted: string[]; rejected: string[]; filed: boolean }> {
@@ -246,6 +246,7 @@ export async function sendMessage(account: EmailAccount, guard: EmailGuard, inpu
   const composed = new MailComposer({
     from: account.address, to: input.to, ...(input.cc?.length ? { cc: input.cc } : {}), ...(input.bcc?.length ? { bcc: input.bcc } : {}),
     subject: input.subject, text: input.text, ...(input.inReplyTo ? { inReplyTo: input.inReplyTo, references: input.references ?? input.inReplyTo } : {}),
+    ...(input.headers ? { headers: input.headers } : {}),
   }).compile();
   const envelope = composed.getEnvelope();
   const raw = await composed.build();

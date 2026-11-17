@@ -135,6 +135,20 @@ export function openTruth(dir: string, options: { fetch?: PageFetcher; now?: () 
       return { ...check, checkId: Number(lastInsertRowid) };
     },
 
+    /** Whether a short exact string (an email address, a phone number) is on a page; the quote rule's three words do not apply. */
+    async checkContains(input: { url: string; needle: string; subject?: string | null }): Promise<ClaimCheck> {
+      const snap = await snapshot(input.url);
+      const needle = input.needle.trim().toLowerCase();
+      let check: ClaimCheck;
+      if (!snap.ok) check = { url: input.url, quote: needle, verdict: "unreachable", reason: `fetch failed: ${snap.failure}`, snapshotId: snap.id };
+      else if ((await textOf(snap)).toLowerCase().includes(needle)) check = { url: input.url, quote: needle, verdict: "verified", reason: "on the page", snapshotId: snap.id };
+      else if (snap.textLength === 0) check = { url: input.url, quote: needle, verdict: "unverifiable", reason: "the page has no readable text", snapshotId: snap.id };
+      else check = { url: input.url, quote: needle, verdict: "missing", reason: "not on the page", snapshotId: snap.id };
+      const { lastInsertRowid } = db.prepare("INSERT INTO claim_checks (at, subject, url, quote, verdict, reason, snapshot_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(now(), input.subject ?? null, check.url, check.quote, check.verdict, check.reason, check.snapshotId);
+      return { ...check, checkId: Number(lastInsertRowid) };
+    },
+
     /** Records an event once per (source, externalId); a repeat returns the first record unchanged. */
     recordEvent(input: EventInput): { event: ExternalEvent; duplicate: boolean } {
       const existing = db.prepare("SELECT * FROM external_events WHERE source = ? AND external_id = ?").get(input.source, input.externalId) as Record<string, unknown> | undefined;

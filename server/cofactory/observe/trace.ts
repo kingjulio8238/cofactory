@@ -5,6 +5,7 @@ import type { Truth } from "../truth/store.ts";
 import { costByStage, costSnapshot } from "./cost.ts";
 import type { ObserveStore } from "./store.ts";
 import type { DiscoveryStore } from "../discovery/store.ts";
+import type { Sprints } from "../validation/sprints.ts";
 
 export interface TraceDeps {
   book: Book;
@@ -12,10 +13,11 @@ export interface TraceDeps {
   observe: ObserveStore;
   runtime: RuntimeStore | null;
   discovery?: DiscoveryStore | null;
+  sprints?: Sprints | null;
 }
 
 /** Looks an evidence link up where it lives; null means the decision points at nothing. */
-export function resolveEvidence(deps: Pick<TraceDeps, "book" | "truth" | "runtime" | "discovery">, link: EvidenceLink): unknown {
+export function resolveEvidence(deps: Pick<TraceDeps, "book" | "truth" | "runtime" | "discovery" | "sprints">, link: EvidenceLink): unknown {
   switch (link.type) {
     case "claim_check": return deps.truth.claimCheck(link.id);
     case "external_event": return deps.truth.event(link.id);
@@ -26,17 +28,19 @@ export function resolveEvidence(deps: Pick<TraceDeps, "book" | "truth" | "runtim
     case "signal": return deps.discovery?.signal(link.id) ?? null;
     case "niche": return deps.discovery?.niche(link.id) ?? null;
     case "dossier": return deps.discovery?.dossier(link.id) ?? null;
+    case "sprint": return deps.sprints?.sprint(link.id) ?? null;
+    case "touch": return deps.sprints?.touch(link.id) ?? null;
   }
 }
 
 /** Stage moves and money that need a record behind them when allowed. */
-const NEEDS_EVIDENCE = new Set(["stage.advance", "spend.authorize", "spend.capture", "company.launch", "company.kill", "company.top_up", "revenue.record", "signal.record", "niche.propose", "niche.select", "dossier.submit", "dossier.champion"]);
+const NEEDS_EVIDENCE = new Set(["stage.advance", "spend.authorize", "spend.capture", "company.launch", "company.kill", "company.top_up", "revenue.record", "signal.record", "niche.propose", "niche.select", "dossier.submit", "dossier.champion", "sprint.start", "sprint.add_buyer", "outreach.send"]);
 
 /**
  * Whether a decision can be traced: its cost snapshot is present, and every link resolves. An allowed decision of a
  * kind that moves a stage or money must also carry at least one link (a move to design needs none).
  */
-export function traceProblem(deps: Pick<TraceDeps, "book" | "truth" | "runtime" | "discovery">, decision: Decision): string | null {
+export function traceProblem(deps: Pick<TraceDeps, "book" | "truth" | "runtime" | "discovery" | "sprints">, decision: Decision): string | null {
   const cost = decision.cost;
   if (!cost || typeof cost.companyShadowCents !== "number" || typeof cost.companySpentCents !== "number") return "no cost snapshot";
   const freeMove = decision.kind === "stage.advance" && /^to design\b/.test(decision.reason);

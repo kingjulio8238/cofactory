@@ -20,6 +20,11 @@ import type { Sessions } from "./runtime/sessions.ts";
 import type { Observer } from "./observe/observer.ts";
 import type { Discovery } from "./discovery/discovery.ts";
 import type { Dossiers } from "./dossier/dossiers.ts";
+import type { Outreach } from "./validation/outreach.ts";
+import type { Rails } from "./validation/rails.ts";
+import type { Sprints } from "./validation/sprints.ts";
+import { createPaymentLink, renderOfferPage } from "./validation/offer.ts";
+import { OUTREACH_CHANNELS } from "../../shared/cofactory/validation.ts";
 import { SIGNAL_KINDS, SOURCE_TYPES } from "../../shared/cofactory/discovery.ts";
 import type { DecisionKind, EvidenceLink } from "../../shared/cofactory/observe.ts";
 import type { Session } from "../../shared/cofactory/runtime.ts";
@@ -75,6 +80,7 @@ export interface ToolContext {
   observe?: Observer;
   discovery?: Discovery;
   dossiers?: Dossiers;
+  validation?: { sprints: Sprints; outreach: Outreach; rails: Rails; saveOffer(companyId: string, html: string): string };
   /** The seat's running session, which decisions and tool calls are filed under. */
   session?: Session | null;
 }
@@ -295,7 +301,7 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     name: "cofactory_submit_dossier",
     description: [
       "Submit the dossier for a selected niche: the one-page case code can check. Every URL is fetched and every quote must be on its page.",
-      "Needs: 5-10 buyers (a page proving each exists and a public contact page); at least 5 practitioner pain quotes from buyers' own pages (forum, review, job board, Q&A) on 2+ sites;",
+      "Needs: 5-10 buyers (a page proving each exists and a public contact page); at least 5 practitioner pain quotes from buyers' own pages on 2+ sites and 2+ kinds of source (forums, reviews, Q&A; job ads may be at most half, since they show spend, not pain);",
       "what buyers spend today (amountCents must be the amount in the quote); the buyer count (value must be the number in its quote); incumbents and what they miss;",
       "why the gap exists and which hidden reasons (monopoly, regulation) you ruled out; a concrete plan for the first ten customers; 3+ specific failure modes;",
       "risks; and the offer, whose price must be at most a third of the human alternative (cited) with at least half the price left after the cost to serve the heaviest customer.",
@@ -339,6 +345,102 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
       const result = ctx.dossiers.champion(args.dossier_id, ctx.actor, args.why, args.evidence);
       decide(ctx, "dossier.champion", result.ok ? "allowed" : "refused", result.ok ? args.why.slice(0, 200) : result.reason, [{ type: "dossier", id: args.dossier_id }], null);
       return result.ok ? ok({ dossier: { id: result.dossier.id, status: result.dossier.status, champion: result.dossier.champion } }) : refused(result.reason);
+    },
+  }),
+  spec({
+    name: "cofactory_start_sprint",
+    description: "Start this company's validation sprint: at most a week to put the offer in front of named buyers and get an answer from the world. It passes on one real payment, or on urgent replies from 3 different buyers; it fails when the week runs out. Returns the rails connected (mailbox, Stripe, public intake) and the outreach caps.",
+    roles: ["ceo"],
+    input: z.object({}),
+    run(_args, ctx) {
+      if (!ctx.validation) return refused("validation is not running");
+      const started = ctx.validation.sprints.start({ companyId: ctx.seat.companyId!, offerUrl: ctx.validation.rails.get(ctx.seat.companyId!).offerUrl });
+      decide(ctx, "sprint.start", started.ok ? "allowed" : "refused", started.ok ? `sprint ends ${new Date(started.sprint.endsAt).toISOString()}` : started.reason, started.ok ? [{ type: "sprint", id: started.sprint.id }] : []);
+      return started.ok ? ok({ sprint: started.sprint, rails: ctx.validation.rails.summary(ctx.seat.companyId!), caps: ctx.validation.sprints.policy }) : refused(started.reason);
+    },
+  }),
+  spec({
+    name: "cofactory_add_buyer",
+    description: "Add a named buyer to the running sprint's contact list. Give the page that shows their public contact route (for email, the address must appear on that page). No bought lists, no guessed addresses; suppressed addresses are refused for good.",
+    roles: ["ceo", "marketer", "seller"],
+    input: z.object({ name: z.string().min(2).max(200), address: z.string().min(3).max(500), channel: z.enum(OUTREACH_CHANNELS), source_url: z.string().url().max(2_000) }),
+    async run(args, ctx) {
+      if (!ctx.validation) return refused("validation is not running");
+      const sprint = ctx.validation.sprints.running(ctx.seat.companyId!);
+      if (!sprint) return refused("no sprint is running; the CEO starts one");
+      const added = await ctx.validation.sprints.addTarget(sprint.id, { name: args.name, address: args.address, channel: args.channel, sourceUrl: args.source_url });
+      decide(ctx, "sprint.add_buyer", added.ok ? "allowed" : "refused", added.ok ? `${args.name} via ${args.channel}` : added.reason, added.ok ? [{ type: "claim_check", id: added.target.sourceCheckId, url: args.source_url }, { type: "sprint", id: sprint.id }] : [{ type: "sprint", id: sprint.id }]);
+      return added.ok ? ok({ buyer: added.target }) : refused(added.reason);
+    },
+  }),
+  spec({
+    name: "cofactory_send_outreach",
+    description: "Email one buyer on the sprint's list from the company's mailbox. Write to them as a person: who you are, the specific problem you can take off their hands, the price, one clear next step. The opt-out line is added to first contact. Refused when the buyer is suppressed or a cap is reached (per day, per sprint, two contacts per buyer at least three days apart). Replies come back as events.",
+    roles: ["ceo", "marketer", "seller"],
+    input: z.object({ buyer_id: z.string().min(1), subject: z.string().min(3).max(200), text: z.string().min(20).max(5_000) }),
+    async run(args, ctx) {
+      if (!ctx.validation) return refused("validation is not running");
+      const sprint = ctx.validation.sprints.running(ctx.seat.companyId!);
+      if (!sprint) return refused("no sprint is running; the CEO starts one");
+      const sent = await ctx.validation.outreach.send(sprint.id, args.buyer_id, { subject: args.subject, text: args.text });
+      decide(ctx, "outreach.send", sent.ok ? "allowed" : "refused", sent.ok ? `email "${args.subject}"` : sent.reason, sent.ok ? [{ type: "touch", id: sent.touchId }, { type: "sprint", id: sprint.id }] : [{ type: "sprint", id: sprint.id }]);
+      return sent.ok ? ok({ sent: { messageId: sent.messageId } }) : refused(sent.reason);
+    },
+  }),
+  spec({
+    name: "cofactory_sprint_status",
+    description: "The running sprint: days left, the buyer list with contacts made, evidence so far (committed events, urgent buyers), caps left, and which rails are connected.",
+    roles: ["ceo", "builder", "marketer", "seller", "operator"],
+    input: z.object({}),
+    run(_args, ctx) {
+      if (!ctx.validation) return refused("validation is not running");
+      const sprint = ctx.validation.sprints.running(ctx.seat.companyId!);
+      const rails = ctx.validation.rails.summary(ctx.seat.companyId!);
+      if (!sprint) return ok({ sprint: null, rails });
+      const touches = ctx.validation.sprints.touches(sprint.id);
+      return ok({
+        sprint, rails, evidence: ctx.validation.sprints.evidence(sprint.id), contactsUsed: touches.length,
+        buyers: ctx.validation.sprints.targets(sprint.id).map((target) => ({ ...target, contacts: touches.filter((touch) => touch.targetId === target.id).length, suppressed: Boolean(ctx.validation!.sprints.suppressed(target.address)) })),
+      });
+    },
+  }),
+  spec({
+    name: "cofactory_publish_offer",
+    description: "Write the offer page: headline, who it is for, what they get, the price, and (when connected) the payment link and a request form. It is served from the company's public intake address. Only say what the dossier can source.",
+    roles: ["ceo", "builder"],
+    input: z.object({
+      business_name: z.string().min(2).max(120), headline: z.string().min(5).max(200), for_whom: z.string().min(5).max(300),
+      deliverables: z.array(z.string().min(3).max(300)).min(1).max(8), price_line: z.string().min(2).max(120), payment_url: z.string().url().nullable().default(null),
+      contact_email: z.string().email(), postal_address: z.string().min(10).max(300),
+    }),
+    run(args, ctx) {
+      if (!ctx.validation) return refused("validation is not running");
+      const companyId = ctx.seat.companyId!;
+      const rails = ctx.validation.rails.summary(companyId);
+      const html = renderOfferPage({ businessName: args.business_name, headline: args.headline, forWhom: args.for_whom, deliverables: args.deliverables, priceLine: args.price_line, paymentUrl: args.payment_url, formAction: rails.formAction, contactEmail: args.contact_email, postalAddress: args.postal_address });
+      const saved = ctx.validation.saveOffer(companyId, html);
+      const url = rails.publicHooksUrl ? `${rails.publicHooksUrl.replace(/\/$/, "")}/hooks/cofactory/offer/${companyId}` : null;
+      if (url) ctx.validation.rails.set(companyId, { offerUrl: url });
+      decide(ctx, "offer.publish", "allowed", url ? `live at ${url}` : `saved to ${saved}; no public address connected yet`, [{ type: "company", id: companyId }]);
+      return ok({ savedTo: saved, url, note: url ? "Check it loads for a stranger, then use the URL as path_live evidence." : "The owner connects a public address (publicHooksUrl) before the page can be reached." });
+    },
+  }),
+  spec({
+    name: "cofactory_payment_link",
+    description: "Create a Stripe payment link for the offer on the company's own Stripe account (connected by the owner). Payments made through it come back as events automatically.",
+    roles: ["ceo", "builder", "seller"],
+    input: z.object({ name: z.string().min(2).max(200), price_cents: z.number().int().positive().max(10_000_000), interval: z.enum(["month", "year"]).nullable().default("month") }),
+    async run(args, ctx) {
+      if (!ctx.validation) return refused("validation is not running");
+      const rails = ctx.validation.rails.get(ctx.seat.companyId!);
+      if (!rails.stripeSecretKey) return refused("the company's Stripe account is not connected; the owner connects it");
+      try {
+        const link = await createPaymentLink({ secretKey: rails.stripeSecretKey, companyId: ctx.seat.companyId!, name: args.name, unitAmountCents: args.price_cents, interval: args.interval });
+        decide(ctx, "payment_link.create", "allowed", `${args.name} at ${args.price_cents} cents`, [{ type: "company", id: ctx.seat.companyId! }]);
+        return ok({ paymentLink: link });
+      } catch (error) {
+        return refused(error instanceof Error ? error.message : String(error));
+      }
     },
   }),
   spec({

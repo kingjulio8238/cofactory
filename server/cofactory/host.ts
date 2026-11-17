@@ -19,6 +19,14 @@ import { createDiscovery, type Discovery } from "./discovery/discovery.ts";
 import { openLocalRegistry } from "./discovery/registry.ts";
 import { openDiscoveryStore } from "./discovery/store.ts";
 import { createDossiers, type Dossiers } from "./dossier/dossiers.ts";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import type { EmailAccount } from "../email/store.ts";
+import type { EmailGuard } from "../email/client.ts";
+import { createIntakeDoor } from "./validation/intake.ts";
+import { duskMailPort } from "./validation/mail-dusk.ts";
+import { createOutreach, type MailPort, type Outreach } from "./validation/outreach.ts";
+import { openRails, type Rails } from "./validation/rails.ts";
+import { openSprints, type Sprints } from "./validation/sprints.ts";
 
 export const COFACTORY_INTERNAL_MCP_PATH = "/api/internal/cofactory/mcp";
 
@@ -44,6 +52,8 @@ export interface CofactoryHostDeps {
   turns?: Omit<TurnPort, "threadFor"> & { createThread(botId: string, title: string): string | null };
   createBot?: LauncherDeps["createBot"];
   policy?: Partial<RuntimePolicy>;
+  /** dusk's connected mailboxes, which company outreach sends from and reads replies in. */
+  email?: { store: { get(address: string): EmailAccount | null }; guard: EmailGuard };
   tickMs?: number;
   log?: (line: string) => void;
 }
@@ -77,11 +87,54 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     const registry = openLocalRegistry(join(deps.dataDir, "cofactory-registry.db"));
     registryClose = () => registry.close();
     discovery = createDiscovery({ store: openDiscoveryStore(join(deps.dataDir, "cofactory-discovery.db")), truth: evidence(), registry });
-    dossiers = createDossiers({ store: discovery.store, truth: evidence(), registry, crossFactoryBlock: discovery.policy.crossFactoryBlock });
+    const perBatch = process.env.COFACTORY_DOSSIERS_PER_BATCH;
+    dossiers = createDossiers({ store: discovery.store, truth: evidence(), registry, crossFactoryBlock: discovery.policy.crossFactoryBlock, ...(perBatch !== undefined && Number(perBatch) >= 0 ? { policy: { dossiersPerBatch: Number(perBatch) } } : {}) });
     return discovery;
   };
   const dossierService = (): Dossiers => { discoveryService(); return dossiers!; };
-  const traceDeps = (): TraceDeps => ({ book: books(), truth: evidence(), observe: observe().store, runtime: runtimeParts()?.store ?? null, discovery: discoveryService().store });
+  let validation: { sprints: Sprints; outreach: Outreach; rails: Rails; saveOffer(companyId: string, html: string): string } | null = null;
+  const offerFile = (companyId: string) => join(deps.dataDir, "cofactory-companies", companyId, "offer", "index.html");
+  const validationParts = () => {
+    if (validation) return validation;
+    const sprints = openSprints(join(deps.dataDir, "cofactory-sprints.db"), { truth: evidence() });
+    const rails = openRails(join(deps.dataDir, "cofactory-rails.json"));
+    const mail: MailPort = deps.email ? duskMailPort(deps.email) : { send: async () => { throw new Error("email is not available on this server"); }, fetchNew: async () => [] };
+    const outreach = createOutreach({ sprints, truth: evidence(), mail, mailboxFor: (companyId) => rails.peek(companyId)?.mailbox ?? null, cursor: sprints.cursor });
+    validation = {
+      sprints, outreach, rails,
+      saveOffer(companyId, html) {
+        const file = offerFile(companyId);
+        mkdirSync(join(file, ".."), { recursive: true });
+        writeFileSync(file, html);
+        return file;
+      },
+    };
+    return validation;
+  };
+  const intakeDoor = createIntakeDoor({
+    formToken: (companyId) => validationParts().rails.peek(companyId)?.formToken ?? null,
+    stripeSecret: (companyId) => validationParts().rails.peek(companyId)?.stripeWebhookSecret ?? null,
+    record: (input) => { evidence().recordEvent(input); },
+    thanksUrl: (companyId) => { const offer = validationParts().rails.peek(companyId)?.offerUrl; return offer ? `${offer}#thanks` : null; },
+    offerPage: (companyId) => (/^[\w-]+$/.test(companyId) && existsSync(offerFile(companyId)) ? readFileSync(offerFile(companyId), "utf8") : null),
+  });
+
+  /** Reads each running sprint's mailbox and settles the sprint on its evidence; a failed sprint raises an alarm. */
+  async function sprintUpkeep(store: RuntimeStore): Promise<void> {
+    const parts = validationParts();
+    for (const sprint of parts.sprints.runningAll()) {
+      try {
+        await parts.outreach.poll(sprint.companyId);
+        store.resolve(sprint.companyId, "mail_failed");
+      } catch (error) {
+        store.raise(sprint.companyId, "mail_failed", `reading the mailbox failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      const settled = parts.sprints.settle(sprint.id);
+      if (settled?.status === "failed") store.raise(sprint.companyId, "sprint_failed", settled.outcome ?? "the sprint ended without enough evidence");
+      if (settled && settled.status !== "running") log(`cofactory: sprint ${sprint.id.slice(0, 8)} ${settled.status}: ${settled.outcome}`);
+    }
+  }
+  const traceDeps = (): TraceDeps => ({ book: books(), truth: evidence(), observe: observe().store, runtime: runtimeParts()?.store ?? null, discovery: discoveryService().store, sprints: validationParts().sprints });
 
   function runtimeParts(): Runtime | null {
     if (runtime) return runtime;
@@ -118,6 +171,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     try {
       await parts.sessions.sweep();
       for (const alarm of checkAlarms({ book: books(), truth: evidence(), store: parts.store, policy: parts.policy })) log(`cofactory: alarm ${alarm.kind}: ${alarm.detail}`);
+      await sprintUpkeep(parts.store);
       await parts.scheduler.tick();
     } catch (error) {
       log(`cofactory: runtime tick failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
@@ -133,6 +187,10 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     observe,
     discovery: discoveryService,
     dossiers: dossierService,
+    validation: validationParts,
+    intakeDoor,
+    /** Whether a bot holds a Cofactory seat: a company seat sends mail only through the outreach gate. */
+    seated: (botId: string) => seatOf(botId) !== null,
     traceDeps,
     tick,
 
@@ -187,7 +245,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       const params = (request.params && typeof request.params === "object" ? request.params : {}) as { name?: unknown; arguments?: unknown };
       const parts = runtimeParts();
       const result = await runTool({
-        book: books(), truth: evidence(), seat, actor: `${seat.role}:${ctx.botName}`, observe: observe(), discovery: discoveryService(), dossiers: dossierService(),
+        book: books(), truth: evidence(), seat, actor: `${seat.role}:${ctx.botName}`, observe: observe(), discovery: discoveryService(), dossiers: dossierService(), validation: validationParts(),
         session: parts?.store.liveFor(seat.botId) ?? null,
         ...(parts ? { sessions: parts.sessions } : {}), ...(parts?.launcher ? { launcher: parts.launcher } : {}),
       }, params.name, params.arguments);
@@ -215,6 +273,8 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       registryClose?.();
       discovery = null;
       dossiers = null;
+      validation?.sprints.close();
+      validation = null;
       registryClose = null;
       book?.close();
       truth?.close();
