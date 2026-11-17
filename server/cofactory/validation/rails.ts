@@ -49,6 +49,17 @@ export function openRails(file: string) {
       write(data);
       return data[companyId]!;
     },
+    /** The rails a company still needs before it can take money from a stranger, as the owner would name them. */
+    missing(companyId: string): string[] {
+      const rails = this.peek(companyId);
+      return [
+        !rails?.mailbox && "a mailbox to send from",
+        !rails?.postalAddress && "a postal address",
+        !rails?.publicHooksUrl && "a public HTTPS address for the intake",
+        !rails?.stripeSecretKey && "a Stripe key",
+        !rails?.stripeWebhookSecret && "the Stripe webhook secret",
+      ].filter((item): item is string => Boolean(item));
+    },
     /** What a seat or a page may see: whether each rail is connected, never the secrets themselves. */
     summary(companyId: string) {
       const rails = this.get(companyId);

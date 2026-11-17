@@ -58,6 +58,8 @@ describe("cofactory validation on a real dusk server", () => {
     const rails = await call("POST", `/api/cofactory/companies/${companyId}/rails`, { publicHooksUrl: "https://hooks.tenderwatch.test", stripeWebhookSecret: "whsec_e2e", postalAddress: "100 Main St, Columbus, OH 43215" });
     expect(rails.rails).toMatchObject({ stripeWebhook: true, mailbox: null, stripeWebhookUrl: `https://hooks.tenderwatch.test/hooks/cofactory/stripe/${companyId}` });
     expect(JSON.stringify(rails)).not.toContain("whsec_e2e");
+    const railsAlarm = await until("the rails alarm", async () => ((await call("GET", "/api/cofactory/state")).runtime?.alarms as Array<{ kind: string; companyId: string; detail: string }> | undefined)?.find((alarm) => alarm.kind === "rails_missing" && alarm.companyId === companyId && !alarm.detail.includes("postal")));
+    expect(railsAlarm.detail).toContain("a mailbox to send from, a Stripe key");
 
     await until("the CEO's session to run its sprint tools", async () => ((await call("GET", `/api/cofactory/decisions?company=${companyId}`)).decisions as Array<{ kind: string }>).some((decision) => decision.kind === "outreach.send") || undefined);
     const sprint = (await call("GET", `/api/cofactory/sprints?company=${companyId}`)).sprints[0];

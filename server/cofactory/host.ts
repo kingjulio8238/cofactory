@@ -234,6 +234,13 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       for (const alarm of checkAlarms({ book: books(), truth: evidence(), store: parts.store, policy: parts.policy })) log(`cofactory: alarm ${alarm.kind}: ${alarm.detail}`);
       await sprintUpkeep(parts.store);
       bookRevenue();
+      for (const company of books().companies().filter((candidate) => candidate.status === "live")) {
+        const missing = validationParts().rails.missing(company.id);
+        const detail = `the owner has not connected ${missing.join(", ")}; work that needs them waits, everything else goes ahead`;
+        const open = parts.store.openAlarms(company.id).find((alarm) => alarm.kind === "rails_missing");
+        if (open && (!missing.length || open.detail !== detail)) parts.store.resolve(company.id, "rails_missing");
+        if (missing.length) parts.store.raise(company.id, "rails_missing", detail);
+      }
       if (deps.createBot) {
         const createBot = deps.createBot;
         await createRehearsals({ orders: validationParts().orders, book: books(), truth: evidence(), store: parts.store, sessions: parts.sessions, observe: observe(), folderOf: validationParts().folderOf, packetRoot: join(deps.dataDir, "cofactory-rehearsals"), createBot }).upkeep();

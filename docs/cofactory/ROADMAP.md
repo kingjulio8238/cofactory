@@ -708,6 +708,10 @@ It found three faults, all fixed:
 | The CEO offered **a free first month**, which can produce no committed evidence inside the sprint. | The brief says not to give the first orders away, and to offer a money-back guarantee on a paid first month instead. |
 | **The sprint's week started before any buyer could be reached**, so the time box was being spent on a page nobody could load. | The week now starts at the first contact. The first contact is refused until the offer page loads for a stranger, checked by fetching it and finding its own form. |
 
+The CEO also spent its session finding out that the rails were missing. Each tick now raises a `rails_missing` alarm
+naming what the owner has not connected, kept current as rails arrive. Every session sees it in its envelope, and the
+owner sees it in `/api/cofactory/state`.
+
 The `outreach-gate` eval grew to 26 cases:
 - postal address on first and follow-up emails;
 - refused without a postal address;
