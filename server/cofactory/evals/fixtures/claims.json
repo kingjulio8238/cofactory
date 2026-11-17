@@ -16,6 +16,8 @@
   { "id": "competitor-gap", "url": "https://fixtures.cofactory.test/pricing", "quote": "Chains of 25 stores or more only", "expect": "verified" },
   { "id": "link-only", "url": "https://fixtures.cofactory.test/pricing", "quote": null, "expect": "verified" },
   { "id": "script-rendered", "url": "https://fixtures.cofactory.test/spa", "quote": "Best reconciliation tool we have used", "expect": "unverifiable" },
+  { "id": "pdf-text", "url": "https://fixtures.cofactory.test/guidance.pdf", "quote": "must keep the training log for three years", "expect": "verified" },
+  { "id": "pdf-altered", "url": "https://fixtures.cofactory.test/guidance.pdf", "quote": "must keep the training log for seven years", "expect": "missing" },
   { "id": "dead-link", "url": "https://fixtures.cofactory.test/gone", "quote": "anything at all on this page", "expect": "unreachable" },
   { "id": "blocked-address", "url": "http://169.254.169.254/latest/meta-data", "quote": null, "expect": "unreachable" },
   { "id": "not-a-url", "url": "forum post from last week", "quote": "nobody sells anything that fits", "expect": "unreachable" }

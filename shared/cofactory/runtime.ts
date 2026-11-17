@@ -45,7 +45,7 @@ export interface JournalEntry {
   blockers: string;
 }
 
-export const ALARM_KINDS = ["stalled", "fake_work", "journal_stale", "zombie", "unstaffed", "unjournaled"] as const;
+export const ALARM_KINDS = ["stalled", "fake_work", "journal_stale", "zombie", "unstaffed", "unjournaled", "discovery_stuck"] as const;
 export type AlarmKind = (typeof ALARM_KINDS)[number];
 
 export interface Alarm {
@@ -62,8 +62,9 @@ export interface RuntimePolicy {
   cadenceMs: number;
   operatingBudgetMs: number;
   deepBudgetMs: number;
-  /** Shadow model cost one session may run up, in cents. */
+  /** Shadow model cost one session may run up, in cents; a deep session gets `deepBudgetCents`. */
   sessionBudgetCents: number;
+  deepBudgetCents: number;
   /** Re-entry stops with this much of a session's time left. */
   reserveMs: number;
   /** A round shorter than this only acknowledges; this many in a row means the seat has stopped working. */
@@ -76,6 +77,8 @@ export interface RuntimePolicy {
   fakeWorkCents: number;
   /** How long past its budget a session may go unsettled before it is a zombie. */
   zombieGraceMs: number;
+  /** Deep sessions one discovery batch may take before it is `discovery_stuck` and the scout stops being woken for it. */
+  discoverySessionsPerBatch: number;
 }
 
 export const DEFAULT_RUNTIME_POLICY: RuntimePolicy = {
@@ -83,6 +86,7 @@ export const DEFAULT_RUNTIME_POLICY: RuntimePolicy = {
   operatingBudgetMs: 45 * 60_000,
   deepBudgetMs: 3 * 60 * 60_000,
   sessionBudgetCents: 500,
+  deepBudgetCents: 3_000,
   reserveMs: 2 * 60_000,
   shortRoundMs: 90_000,
   shortRounds: 5,
@@ -90,4 +94,5 @@ export const DEFAULT_RUNTIME_POLICY: RuntimePolicy = {
   silenceDays: 3,
   fakeWorkCents: 1_500,
   zombieGraceMs: 15 * 60_000,
+  discoverySessionsPerBatch: 4,
 };

@@ -174,7 +174,7 @@ export function createSessions(deps: SessionDeps) {
       const session = store.createSession({
         companyId: input.companyId, botId: input.botId, role: seat.role, threadId, kind: input.kind, trigger: input.trigger,
         objective: input.objective, doneWhen: input.doneWhen,
-        budgetMs: input.kind === "deep" ? policy.deepBudgetMs : policy.operatingBudgetMs, budgetCents: policy.sessionBudgetCents,
+        budgetMs: input.kind === "deep" ? policy.deepBudgetMs : policy.operatingBudgetMs, budgetCents: input.kind === "deep" ? policy.deepBudgetCents : policy.sessionBudgetCents,
       });
       await runRound(session, envelope(session, input.context));
       return { session: store.session(session.id)!, started: true };

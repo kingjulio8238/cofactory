@@ -45,7 +45,7 @@ describe("truth layer", () => {
     expect(later.id).not.toBe(first.id);
     expect(later.sha256).toBe(first.sha256);
     expect(readdirSync(join(dir, "snapshots"))).toEqual([`${first.sha256}.body`]);
-    expect(store.text(first.id)).toContain("nobody sells anything that fits a shop our size");
+    expect(await store.text(first.id)).toContain("nobody sells anything that fits a shop our size");
   });
 
   it("keeps every claim check, and they cannot be edited", async () => {

@@ -1,6 +1,7 @@
 import type { Company, FactoryMessage, Membership, Role } from "../../../shared/cofactory/types.ts";
 import type { Book } from "../book.ts";
 import type { Truth } from "../truth/store.ts";
+import type { Discovery } from "../discovery/discovery.ts";
 import type { Sessions } from "./sessions.ts";
 import type { RuntimeStore } from "./store.ts";
 
@@ -42,6 +43,7 @@ export interface SchedulerDeps {
   truth: Truth;
   store: RuntimeStore;
   sessions: Sessions;
+  discovery?: Discovery;
   now?: () => number;
 }
 
@@ -99,6 +101,37 @@ export function createScheduler(deps: SchedulerDeps) {
     return started;
   }
 
+  /** Wakes the scout for deep discovery sessions while a batch is open and short, up to the batch's session allowance. */
+  async function wakeForDiscovery(): Promise<boolean> {
+    const discovery = deps.discovery;
+    const scout = seatFor(null, "scout");
+    if (!discovery || !scout || store.liveFor(scout.botId)) return false;
+    const status = discovery.batchStatus();
+    if (!status || status.batch.closedAt !== null) return false;
+    const trigger = `discovery:${status.batch.id}`;
+    const past = store.sessionsFor(null, 200).filter((session) => session.botId === scout.botId && session.trigger === trigger);
+    const last = past[0];
+    if (last?.status === "waiting" && last.endRequested?.nextWakeAt && now() < last.endRequested.nextWakeAt) return false;
+    if (past.length >= sessions.policy.discoverySessionsPerBatch) {
+      store.raise(null, "discovery_stuck", `batch ${status.batch.id.slice(0, 8)} is still short after ${past.length} scout sessions: ${status.short.join("; ")}`);
+      return false;
+    }
+    const profile = discovery.profile()!;
+    const result = await sessions.request({
+      companyId: null, botId: scout.botId, kind: "deep", trigger,
+      objective: `Discovery batch ${status.batch.id.slice(0, 8)}: find extremely niche businesses only this factory would find, each resting on verified signals and one of the owner's inputs.`,
+      doneWhen: status.complete ? "the batch meets its target and quotas; close it with cofactory_close_batch" : `the batch has ${status.batch.target} niches with the boring and cross-field quotas met (still needs: ${status.short.join("; ")})`,
+      context: [
+        `Owner inputs (cite by id): ${profile.inputs.map((item) => `${item.id} = ${item.field}: ${item.text}`).join("; ")}`,
+        profile.constraints.length ? `Owner constraints: ${profile.constraints.join("; ")}` : "",
+        profile.seedNiches.length ? `Seed niches to look into first: ${profile.seedNiches.join("; ")}` : "",
+        status.batch.note ? `Batch note: ${status.batch.note}` : "",
+        `So far: ${status.niches} niches from ${status.signals} signals on ${status.sites} sites.`,
+      ].filter(Boolean).join("\n"),
+    });
+    return !("refused" in result) && result.started;
+  }
+
   return {
     /** One pass: message wakes, then for each live company event wakes and its CEO's cadence, then the lead's cadence. */
     async tick(): Promise<{ started: number }> {
@@ -112,6 +145,7 @@ export function createScheduler(deps: SchedulerDeps) {
         const result = await sessions.request({ companyId: company.id, botId: ceo.botId, kind: "operating", trigger: "cadence", objective: goal.objective, doneWhen: goal.doneWhen });
         if (!("refused" in result) && result.started) started++;
       }
+      if (await wakeForDiscovery()) started++;
       const lead = seatFor(null, "lead");
       if (lead && cadenceDue(lead)) {
         const result = await sessions.request({ companyId: null, botId: lead.botId, kind: "operating", trigger: "cadence", ...FACTORY_GOAL });

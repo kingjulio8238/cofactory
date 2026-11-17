@@ -7,20 +7,21 @@ import type { ClaimCheck, EventKind, ExternalEvent, Snapshot } from "../../../sh
 import { declaredCharset } from "../../link-preview/meta.ts";
 import { guardedGet, type Fetched } from "../../link-preview/net.ts";
 import { classifyEvent } from "./classify.ts";
+import { pdfText } from "../../pdf-text.ts";
 import { htmlToText, quoteAppears } from "./text.ts";
 
 /** One GET of a public page; the default goes through dusk's SSRF-guarded fetch. */
 export type PageFetcher = (url: URL) => Promise<Fetched>;
 
-const MAX_PAGE_BYTES = 3_000_000;
+const MAX_PAGE_BYTES = 10_000_000;
 /** Below this much readable text a missing quote proves nothing: the page is likely rendered by script. */
 const THIN_PAGE_CHARS = 400;
 
-const PAGE_TYPES = /^(text\/html|text\/plain|application\/xhtml\+xml)/i;
+const PAGE_TYPES = /^(text\/html|text\/plain|application\/xhtml\+xml|application\/pdf)/i;
 
 export const guardedPageFetcher: PageFetcher = (url) => guardedGet(url, {
   limit: MAX_PAGE_BYTES, partial: true, accept: (type) => PAGE_TYPES.test(type),
-  headers: { accept: "text/html,application/xhtml+xml,text/plain;q=0.9", "user-agent": "Mozilla/5.0 (compatible; evidence-check)" },
+  headers: { accept: "text/html,application/xhtml+xml,text/plain;q=0.9,application/pdf;q=0.8", "user-agent": "Mozilla/5.0 (compatible; evidence-check)" },
   signal: AbortSignal.timeout(20_000),
 });
 
@@ -74,7 +75,7 @@ export function openTruth(dir: string, options: { fetch?: PageFetcher; now?: () 
     sha256: row.sha256 === null ? null : String(row.sha256), textLength: Number(row.text_length),
   });
 
-  const textOf = (snapshot: Snapshot): string => {
+  const textOf = async (snapshot: Snapshot): Promise<string> => {
     if (!snapshot.sha256 || !existsSync(bodyFile(snapshot.sha256))) return "";
     const body = readFileSync(bodyFile(snapshot.sha256));
     return pageText(body, snapshot.contentType ?? "");
@@ -92,7 +93,7 @@ export function openTruth(dir: string, options: { fetch?: PageFetcher; now?: () 
     if (!fetched.ok) return record({ url: rawUrl, ok: false, failure: fetched.reason });
     const sha256 = createHash("sha256").update(fetched.body).digest("hex");
     if (!existsSync(bodyFile(sha256))) writeFileSync(bodyFile(sha256), fetched.body, { mode: 0o600 });
-    const text = pageText(fetched.body, fetched.type);
+    const text = await pageText(fetched.body, fetched.type);
     return record({ url: rawUrl, finalUrl: fetched.url.href, ok: true, contentType: fetched.type, sha256, textLength: text.length });
   }
 
@@ -109,7 +110,7 @@ export function openTruth(dir: string, options: { fetch?: PageFetcher; now?: () 
   return {
     snapshot,
 
-    text(snapshotId: string): string {
+    async text(snapshotId: string): Promise<string> {
       const row = db.prepare("SELECT * FROM snapshots WHERE id = ?").get(snapshotId) as Record<string, unknown> | undefined;
       return row ? textOf(rowToSnapshot(row)) : "";
     },
@@ -122,9 +123,11 @@ export function openTruth(dir: string, options: { fetch?: PageFetcher; now?: () 
       if (!snap.ok) check = { url: input.url, quote, verdict: "unreachable", reason: `fetch failed: ${snap.failure}`, snapshotId: snap.id };
       else if (!quote) check = { url: input.url, quote, verdict: "verified", reason: "page resolves", snapshotId: snap.id };
       else {
-        const found = quoteAppears(quote, textOf(snap));
+        const found = quoteAppears(quote, await textOf(snap));
         if (found.found) check = { url: input.url, quote, verdict: "verified", reason: found.reason, snapshotId: snap.id };
-        else if (snap.textLength < THIN_PAGE_CHARS) check = { url: input.url, quote, verdict: "unverifiable", reason: `only ${snap.textLength} characters of text: likely rendered by script`, snapshotId: snap.id };
+        else if (snap.textLength === 0 || (snap.textLength < THIN_PAGE_CHARS && !/pdf/i.test(snap.contentType ?? ""))) {
+          check = { url: input.url, quote, verdict: "unverifiable", reason: snap.textLength === 0 ? "the page has no readable text (a scanned or locked document?)" : `only ${snap.textLength} characters of text: likely rendered by script`, snapshotId: snap.id };
+        }
         else check = { url: input.url, quote, verdict: "missing", reason: found.reason, snapshotId: snap.id };
       }
       const { lastInsertRowid } = db.prepare("INSERT INTO claim_checks (at, subject, url, quote, verdict, reason, snapshot_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
@@ -184,7 +187,11 @@ export function openTruth(dir: string, options: { fetch?: PageFetcher; now?: () 
 
 export type Truth = ReturnType<typeof openTruth>;
 
-function pageText(body: Buffer, type: string): string {
+/** The readable text of a fetched body: HTML stripped, a PDF's text layer extracted, plain text as it is. */
+async function pageText(body: Buffer, type: string): Promise<string> {
+  if (/application\/pdf/i.test(type) || body.subarray(0, 5).toString("latin1") === "%PDF-") {
+    try { return await pdfText(body); } catch { return ""; }
+  }
   const head = body.subarray(0, 4_096).toString("latin1");
   const charset = /charset=([\w-]+)/i.exec(type)?.[1] ?? declaredCharset(head) ?? "utf-8";
   let decoded: string;

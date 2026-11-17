@@ -25,16 +25,17 @@ const readFixture = (name: string) => readFileSync(new URL(name, FIXTURES), "utf
  * address is refused exactly as it would be live.
  */
 export const fixtureFetcher: PageFetcher = (url) => guardedGet(url, {
-  limit: 3_000_000, partial: true, accept: (type) => /^text\/html|^text\/plain/.test(type), headers: {}, signal: AbortSignal.timeout(5_000),
+  limit: 3_000_000, partial: true, accept: (type) => /^text\/html|^text\/plain|^application\/pdf/.test(type), headers: {}, signal: AbortSignal.timeout(5_000),
 }, {
   resolve: async (host) => {
-    if (host === FIXTURE_HOST) return [{ address: "93.184.216.34", family: 4 }];
+    if (host === FIXTURE_HOST || host.endsWith(".test")) return [{ address: "93.184.216.34", family: 4 }];
     if (/^[\d.]+$/.test(host)) return [{ address: host, family: 4 }];
     throw new Error("no network in evals");
   },
   request: async (target): Promise<Answer> => {
-    const page = { "/forum": "forum.html", "/pricing": "pricing.html", "/spa": "spa.html" }[target.pathname];
+    const page = { "/forum": "forum.html", "/pricing": "pricing.html", "/spa": "spa.html", "/jobs": "jobs.html", "/regulator": "regulator.html", "/reviews": "reviews.html", "/guidance.pdf": "guidance.pdf" }[target.pathname];
     if (!page) return { status: 404, location: null, type: "text/html", body: Buffer.from("not found"), truncated: false };
+    if (page.endsWith(".pdf")) return { status: 200, location: null, type: "application/pdf", body: readFileSync(new URL(`pages/${page}`, FIXTURES)), truncated: false };
     return { status: 200, location: null, type: "text/html; charset=utf-8", body: Buffer.from(readFixture(`pages/${page}`)), truncated: false };
   },
 });

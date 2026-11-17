@@ -15,6 +15,9 @@ import { openTruth, type Truth } from "./truth/store.ts";
 import { createObserver, type Observer } from "./observe/observer.ts";
 import { openObserveStore } from "./observe/store.ts";
 import type { TraceDeps } from "./observe/trace.ts";
+import { createDiscovery, type Discovery } from "./discovery/discovery.ts";
+import { openLocalRegistry } from "./discovery/registry.ts";
+import { openDiscoveryStore } from "./discovery/store.ts";
 
 export const COFACTORY_INTERNAL_MCP_PATH = "/api/internal/cofactory/mcp";
 
@@ -57,6 +60,8 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
   let truth: Truth | null = null;
   let runtime: Runtime | null = null;
   let observer: Observer | null = null;
+  let discovery: Discovery | null = null;
+  let registryClose: (() => void) | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
   let ticking = false;
   const log = deps.log ?? ((line: string) => console.log(line));
@@ -64,7 +69,14 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
   const evidence = (): Truth => (truth ??= openTruth(join(deps.dataDir, "cofactory-evidence")));
   const seatOf = (botId: string): Membership | null => books().membership(botId);
   const observe = (): Observer => (observer ??= createObserver({ store: openObserveStore(join(deps.dataDir, "cofactory-observe.db")), book: books() }));
-  const traceDeps = (): TraceDeps => ({ book: books(), truth: evidence(), observe: observe().store, runtime: runtimeParts()?.store ?? null });
+  const discoveryService = (): Discovery => {
+    if (discovery) return discovery;
+    const registry = openLocalRegistry(join(deps.dataDir, "cofactory-registry.db"));
+    registryClose = () => registry.close();
+    discovery = createDiscovery({ store: openDiscoveryStore(join(deps.dataDir, "cofactory-discovery.db")), truth: evidence(), registry });
+    return discovery;
+  };
+  const traceDeps = (): TraceDeps => ({ book: books(), truth: evidence(), observe: observe().store, runtime: runtimeParts()?.store ?? null, discovery: discoveryService().store });
 
   function runtimeParts(): Runtime | null {
     if (runtime) return runtime;
@@ -86,7 +98,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       interrupt: turns.interrupt,
     };
     const sessions = createSessions({ store, book: books(), workspaces, turns: port, policy, log });
-    const scheduler = createScheduler({ book: books(), truth: evidence(), store, sessions });
+    const scheduler = createScheduler({ book: books(), truth: evidence(), store, sessions, discovery: discoveryService() });
     const launcher = deps.createBot ? createLauncher({ book: books(), workspaces, createBot: deps.createBot }) : undefined;
     runtime = { store, sessions, scheduler, launcher, policy };
     return runtime;
@@ -113,6 +125,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     evidence,
     runtime: runtimeParts,
     observe,
+    discovery: discoveryService,
     traceDeps,
     tick,
 
@@ -166,7 +179,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       const params = (request.params && typeof request.params === "object" ? request.params : {}) as { name?: unknown; arguments?: unknown };
       const parts = runtimeParts();
       const result = await runTool({
-        book: books(), truth: evidence(), seat, actor: `${seat.role}:${ctx.botName}`, observe: observe(),
+        book: books(), truth: evidence(), seat, actor: `${seat.role}:${ctx.botName}`, observe: observe(), discovery: discoveryService(),
         session: parts?.store.liveFor(seat.botId) ?? null,
         ...(parts ? { sessions: parts.sessions } : {}), ...(parts?.launcher ? { launcher: parts.launcher } : {}),
       }, params.name, params.arguments);
@@ -190,6 +203,10 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       runtime?.store.close();
       observer?.store.close();
       observer = null;
+      discovery?.store.close();
+      registryClose?.();
+      discovery = null;
+      registryClose = null;
       book?.close();
       truth?.close();
       runtime = null;

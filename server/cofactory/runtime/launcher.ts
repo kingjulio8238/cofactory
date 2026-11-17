@@ -1,4 +1,4 @@
-import type { Company, CompanyRole } from "../../../shared/cofactory/types.ts";
+import type { Company, CompanyRole, FactoryRole } from "../../../shared/cofactory/types.ts";
 import type { Book, Result } from "../book.ts";
 import type { Workspaces } from "./workspace.ts";
 
@@ -44,6 +44,30 @@ export const NICHE_PLAYBOOK: Playbook = {
   brief: `# {company}\n\n{brief}\n\n${RULES}\n`,
 };
 
+/** The factory's two standing seats. The scout's method is the discovery rules in docs/cofactory/pipeline-roadmap.md. */
+export const FACTORY_SEATS: Array<{ role: FactoryRole; name: string; instructions: string }> = [
+  {
+    role: "lead",
+    name: "Factory Lead",
+    instructions: "You are the lead of a Cofactory factory. You own the portfolio: which niches become companies, how much each gets, when a company is killed or topped up, and what reaches the owner. You decide on evidence, never on how good something sounds. Read cofactory_status and the auditor's recommendations each session, act on them, and escalate to the owner only for identity, legal or out-of-policy steps.",
+  },
+  {
+    role: "scout",
+    name: "Factory Scout",
+    instructions: [
+      "You are the scout of a Cofactory factory. Your job is to find extremely niche businesses that only this factory would find: one buyer, one job they already pay for, one channel that reaches them.",
+      "Method:",
+      "1. Start from the owner's inputs (cofactory_profile), not from trend lists or your own ideas. Go deep into one sub-sub-domain at a time.",
+      "2. Look for observed demand, not plausibility: complaints, 'I'd pay for', 'why doesn't someone make', workarounds people have kept for years, job posts with budgets, new regulations that create work, registries that count the buyers. Forums, reviews, job boards, regulators and registries beat news and trend pieces.",
+      "3. Record each piece with cofactory_record_signal, quoting the page word for word. A quote that is not on the page is refused; never paraphrase or invent.",
+      "4. Propose a niche with cofactory_propose_niche only when at least 3 signals from 3 different sites and 2 kinds of source agree, at least one of them buyers in their own words (a forum, review, job post or Q&A page), and it uses one of the owner's inputs. Prefer buyers who already pay humans a lot for the job, so agents can do it for a third of the price; boring, tedious work the agents can absorb is a moat. A poor niche chosen only to avoid competition is not a niche.",
+      "5. Say precisely what incumbents miss and why the gap exists; a vague 'they don't get it' is not enough.",
+      "6. Mix it: aim for at least a fifth boring, operations-heavy niches and a fifth that cross an owner input with an unrelated field. If a niche is refused as taken by another factory, go elsewhere.",
+      "Write the journal before ending each session: what you searched, what you found, and where the next session should dig.",
+    ].join("\n"),
+  },
+];
+
 const fill = (template: string, company: Company) => template.replaceAll("{company}", company.name).replaceAll("{brief}", company.brief);
 const ROLE_NAMES: Record<CompanyRole, string> = { ceo: "CEO", builder: "Builder", marketer: "Marketer", seller: "Seller", operator: "Operator" };
 
@@ -57,6 +81,19 @@ export interface LauncherDeps {
 /** Launches a company from a playbook: the books, its workspace and brief, and a seated team. */
 export function createLauncher(deps: LauncherDeps) {
   return {
+    /** Creates and seats the factory's lead and scout; a seat already filled is left as it is. */
+    async staffFactory(): Promise<Array<{ role: FactoryRole; botId: string; created: boolean }>> {
+      const staffed: Array<{ role: FactoryRole; botId: string; created: boolean }> = [];
+      for (const seat of FACTORY_SEATS) {
+        const existing = deps.book.members().find((member) => member.companyId === null && member.role === seat.role);
+        if (existing) { staffed.push({ role: seat.role, botId: existing.botId, created: false }); continue; }
+        const botId = await deps.createBot({ name: seat.name, instructions: seat.instructions, section: "Cofactory · Factory" });
+        deps.book.seat({ botId, role: seat.role, companyId: null });
+        staffed.push({ role: seat.role, botId, created: true });
+      }
+      return staffed;
+    },
+
     async launch(input: { name: string; brief: string; capCents: number }, actor: string, playbook: Playbook = NICHE_PLAYBOOK): Promise<Result<{ company: Company; team: Array<{ role: CompanyRole; botId: string }> }>> {
       const launched = deps.book.launch(input, actor);
       if (!launched.ok) return launched;

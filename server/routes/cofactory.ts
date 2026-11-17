@@ -15,6 +15,8 @@ import type { Launcher } from "../cofactory/runtime/launcher.ts";
 import type { Sessions } from "../cofactory/runtime/sessions.ts";
 import type { RuntimeStore } from "../cofactory/runtime/store.ts";
 import type { Truth } from "../cofactory/truth/store.ts";
+import type { Discovery } from "../cofactory/discovery/discovery.ts";
+import { PROFILE_FIELDS } from "../../shared/cofactory/discovery.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
 const cents = z.number().int().positive().max(100_000_000);
@@ -31,6 +33,7 @@ export interface CofactoryRouteDeps {
   evidence: () => Truth;
   runtime: () => { store: RuntimeStore; sessions: Sessions; launcher: Launcher | undefined } | null;
   observe: () => Observer;
+  discovery: () => Discovery;
   traceDeps: () => TraceDeps;
   tick: () => Promise<void>;
   owner: (auth: RequestAuth) => boolean;
@@ -106,6 +109,14 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
         if (!session) return json(res, 404, { error: "no such session" });
         return json(res, 200, { session, events: runtime.store.sessionEvents(id) });
       }
+      if (path === "/api/cofactory/discovery") {
+        const discovery = deps.discovery();
+        const status = discovery.batchStatus();
+        return json(res, 200, {
+          profile: discovery.profile(), batch: status, batches: discovery.store.batches(),
+          niches: discovery.store.niches(status ? { batchId: status.batch.id } : {}), signals: discovery.store.signals(status ? { batchId: status.batch.id } : {}),
+        });
+      }
       if (path === "/api/cofactory/ledger") return json(res, 200, { entries: book.entries(companyParam ? { companyId: companyParam } : {}) });
       if (path === "/api/cofactory/events") return json(res, 200, { events: deps.evidence().events(companyParam ? { companyId: companyParam } : {}) });
       return PASS;
@@ -126,6 +137,35 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
     };
     const answer = (result: { ok: boolean; reason?: string }) => json(res, result.ok ? 200 : 409, result);
 
+    if (path === "/api/cofactory/profile") {
+      const input = parse(z.object({
+        inputs: z.array(z.object({ field: z.enum(PROFILE_FIELDS), text: z.string().min(1).max(300) })).max(60),
+        constraints: z.array(z.string().max(300)).max(30).default([]), seedNiches: z.array(z.string().max(300)).max(30).default([]),
+      }));
+      if (!input) return;
+      const result = deps.discovery().setProfile(input);
+      record(null, "profile", result.ok ? `${result.profile.inputs.length} inputs` : result.reason);
+      return answer(result);
+    }
+    if (path === "/api/cofactory/discovery/batches") {
+      const input = parse(z.object({ note: z.string().max(1_000).default(""), target: z.number().int().min(1).max(200).optional() }));
+      if (!input) return;
+      const result = deps.discovery().startBatch(input.note, input.target);
+      record(null, "discovery_batch", result.ok ? `target ${result.batch.target}` : result.reason);
+      if (result.ok) void deps.tick();
+      return answer(result);
+    }
+    if (path === "/api/cofactory/discovery/close") {
+      const result = deps.discovery().closeBatch();
+      record(null, "discovery_close", result.ok ? "closed" : result.reason);
+      return answer(result);
+    }
+    if (path === "/api/cofactory/factory/staff") {
+      if (!runtime?.launcher) return json(res, 503, { error: "the runtime is not running" });
+      const staffed = await runtime.launcher.staffFactory();
+      record(null, "staff_factory", staffed.map((seat) => `${seat.role}${seat.created ? " created" : ""}`).join(", "));
+      return json(res, 200, { ok: true, staffed });
+    }
     if (path === "/api/cofactory/deposit") {
       const input = parse(z.object({ cents }));
       if (!input) return;

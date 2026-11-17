@@ -18,6 +18,8 @@ import type { Truth } from "./truth/store.ts";
 import type { Launcher } from "./runtime/launcher.ts";
 import type { Sessions } from "./runtime/sessions.ts";
 import type { Observer } from "./observe/observer.ts";
+import type { Discovery } from "./discovery/discovery.ts";
+import { SIGNAL_KINDS, SOURCE_TYPES } from "../../shared/cofactory/discovery.ts";
 import type { DecisionKind, EvidenceLink } from "../../shared/cofactory/observe.ts";
 import type { Session } from "../../shared/cofactory/runtime.ts";
 
@@ -52,6 +54,7 @@ export interface ToolContext {
   launcher?: Launcher;
   now?: () => number;
   observe?: Observer;
+  discovery?: Discovery;
   /** The seat's running session, which decisions and tool calls are filed under. */
   session?: Session | null;
 }
@@ -192,6 +195,76 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
       const ended = sessions.requestEnd(seat, { outcome: args.outcome, summary, nextWakeAt });
       decide(ctx, "session.end", ended.ok ? "allowed" : "refused", ended.ok ? `${args.outcome}: ${summary}` : ended.reason, ctx.session ? [{ type: "session", id: ctx.session.id }] : []);
       return ended.ok ? ok({ ending: { sessionId: ended.session.id, outcome: args.outcome } }) : refused(ended.reason);
+    },
+  }),
+  spec({
+    name: "cofactory_profile",
+    description: "The factory's profile: the owner's own inputs (domains, skills, network, assets, geography, languages, interests), each with an id a niche must cite, the owner's constraints, any seed niches to look into, and the open discovery batch with what it still needs.",
+    roles: ["scout", "lead"],
+    input: z.object({}),
+    run(_args, { discovery }) {
+      if (!discovery) return refused("discovery is not running");
+      const profile = discovery.profile();
+      if (!profile) return refused("the owner has not set the factory profile yet");
+      return ok({ profile, batch: discovery.batchStatus() });
+    },
+  }),
+  spec({
+    name: "cofactory_record_signal",
+    description: "Record one piece of demand evidence you found on a public page: a complaint, an 'I'd pay for', a 'why doesn't someone', a long-lived workaround, a job post with a budget, a regulation, a price, or a registry count. The quote must be copied word for word from the page (at least six words); it is fetched and checked, and refused if it is not there. Only recorded signals can back a niche.",
+    roles: ["scout"],
+    input: z.object({
+      url: z.string().url().max(2_000), quote: z.string().min(1).max(1_500), kind: z.enum(SIGNAL_KINDS), source_type: z.enum(SOURCE_TYPES),
+      buyer_hint: z.string().min(1).max(200), job_hint: z.string().min(1).max(300),
+    }),
+    async run(args, ctx) {
+      if (!ctx.discovery) return refused("discovery is not running");
+      const result = await ctx.discovery.recordSignal({ url: args.url, quote: args.quote, kind: args.kind, sourceType: args.source_type, buyerHint: args.buyer_hint, jobHint: args.job_hint });
+      const link = result.checkId === undefined ? [] : [{ type: "claim_check" as const, id: result.checkId, url: args.url }];
+      if (!result.ok) { decide(ctx, "signal.record", "refused", `${args.kind} from ${args.url}: ${result.reason}`, link, null); return refused(result.reason); }
+      if (!result.duplicate) decide(ctx, "signal.record", "allowed", `${args.kind} (${args.source_type}) from ${result.signal.site}`, [...link, { type: "signal", id: result.signal.id }], null);
+      return ok({ signal: result.signal, duplicate: result.duplicate });
+    },
+  }),
+  spec({
+    name: "cofactory_propose_niche",
+    description: "Propose one extremely niche business: one buyer, one job they pay to get done, one channel that reaches them. It must rest on at least 3 recorded signals from at least 3 different sites and 2 kinds of source, at least one of them buyers in their own words (forum, review, job board, Q&A, social or marketplace page), cite at least one of the owner's input ids, and say precisely what incumbents miss and why the gap exists. Mark boring (operations-heavy, tedious) and cross_field (crosses an owner input with an unrelated field) honestly: the batch has quotas for both. Refused if it duplicates this factory's niches or a niche another factory holds.",
+    roles: ["scout"],
+    input: z.object({
+      buyer: z.string().min(3).max(200), job: z.string().min(3).max(300), channel: z.string().min(3).max(200), why_gap: z.string().min(1).max(2_000),
+      signal_ids: z.array(z.string()).min(1).max(20), unique_input_ids: z.array(z.string()).min(1).max(10), boring: z.boolean(), cross_field: z.boolean(),
+    }),
+    run(args, ctx) {
+      if (!ctx.discovery) return refused("discovery is not running");
+      const result = ctx.discovery.proposeNiche({ buyer: args.buyer, job: args.job, channel: args.channel, whyGap: args.why_gap, signalIds: args.signal_ids, uniqueInputIds: args.unique_input_ids, boring: args.boring, crossField: args.cross_field });
+      const signals = args.signal_ids.filter((id) => ctx.discovery!.store.signal(id)).map((id) => ({ type: "signal" as const, id }));
+      if (!result.ok) { decide(ctx, "niche.propose", "refused", `${args.buyer} · ${args.job}: ${result.reason}`, signals, null); return refused(result.reason); }
+      decide(ctx, "niche.propose", "allowed", `${result.niche.buyer} · ${result.niche.job} · ${result.niche.channel}`, [{ type: "niche", id: result.niche.id }, ...signals], null);
+      return ok({ niche: result.niche, batch: ctx.discovery.batchStatus() });
+    },
+  }),
+  spec({
+    name: "cofactory_discovery_status",
+    description: "Where the open discovery batch stands: niches and signals so far, the boring and cross-field shares, and what it still needs.",
+    roles: ["scout", "lead"],
+    input: z.object({}),
+    run(_args, { discovery }) {
+      if (!discovery) return refused("discovery is not running");
+      const status = discovery.batchStatus();
+      if (!status) return refused("no discovery batch has been started");
+      const niches = discovery.store.niches({ batchId: status.batch.id }).map((niche) => ({ id: niche.id, buyer: niche.buyer, job: niche.job, channel: niche.channel, boring: niche.boring, crossField: niche.crossField, density: niche.density }));
+      return ok({ status, niches });
+    },
+  }),
+  spec({
+    name: "cofactory_close_batch",
+    description: "Close the open discovery batch once it has its target number of niches and meets the boring and cross-field quotas.",
+    roles: ["scout", "lead"],
+    input: z.object({}),
+    run(_args, { discovery }) {
+      if (!discovery) return refused("discovery is not running");
+      const closed = discovery.closeBatch();
+      return closed.ok ? ok({ status: closed.status }) : refused(closed.reason);
     },
   }),
   spec({

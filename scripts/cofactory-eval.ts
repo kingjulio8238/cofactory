@@ -5,13 +5,13 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { renderScorecard, runSuites } from "../server/cofactory/evals/harness.ts";
-import { FOUNDATION_SUITES } from "../server/cofactory/evals/suites.ts";
+import { ALL_SUITES } from "../server/cofactory/evals/all.ts";
 
 const historyFile = process.env.COFACTORY_EVAL_HISTORY || join(homedir(), ".cofactory", "evals", "history.jsonl");
 let rev: string | null = null;
 try { rev = execFileSync("git", ["rev-parse", "--short", "HEAD"], { encoding: "utf8" }).trim(); } catch { rev = null; }
 
-const card = await runSuites(FOUNDATION_SUITES, { historyFile, rev });
+const card = await runSuites(ALL_SUITES, { historyFile, rev });
 console.log(renderScorecard(card));
 console.log(`history: ${historyFile}`);
 process.exit(card.pass ? 0 : 1);

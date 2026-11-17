@@ -17,7 +17,7 @@ stage's row and its section when its status changes. The rules behind the pipeli
 | Foundations | [F2 Eval harness](#f2-eval-harness) | Done (core) | Runs in one command; flags a planted regression |
 | Foundations | [F3 Runtime and persistence](#f3-runtime-and-persistence) | Done | A fake-engine company survives kills, restarts and a multi-day simulated run with no zombie state |
 | Foundations | [F4 Observability](#f4-observability) | Done | Every gate decision is traceable to its evidence and its cost |
-| Pipeline | [P1 Discovery](#p1-discovery) | Not started | Signals 100% verified; divergence under the ceiling across 10 simulated profiles |
+| Pipeline | [P1 Discovery](#p1-discovery) | Done | Signals 100% verified; divergence under the ceiling across 10 simulated profiles |
 | Pipeline | [P2 Dossiers and scoring](#p2-dossiers-and-scoring) | Not started | Claim verifier ≥ 95%; adversarial Q&A; post-cutoff rediscovery baseline |
 | Pipeline | [P3 Offer and validation](#p3-offer-and-validation) | Not started | One real sprint completed inside its cap, gates fed by real events |
 | Pipeline | [P4 First dollar](#p4-first-dollar) | Not started | First arm's-length dollar, or a clean, post-mortemed kill |
@@ -336,8 +336,92 @@ A condition that clears resolves its alarm.
 ## Pipeline
 
 ### P1 Discovery
-Factory profile, signal miner and store, niche synthesis (buyer × job × channel), divergence across factories,
-and a claim registry.
+
+**Why:** it is the widest and cheapest stage and feeds everything after it. "Not the same business for everyone" has to
+hold from the first candidate.
+
+| Piece | Where | What it does |
+|---|---|---|
+| Factory profile | `server/cofactory/discovery/discovery.ts` `setProfile`; `POST /api/cofactory/profile` | The owner's own inputs (domains, skills, network, assets, geography, languages, interests), each with a stable id, plus constraints and optional seed niches. At least 3 inputs. |
+| Signals | `cofactory_record_signal` (scout) | A verbatim quote of at least 6 words from a public page, with a kind and a source type. It is stored only if the truth layer finds the quote on the fetched page, so 100% of stored signals are verified by construction. Every attempt, refused or not, is a `signal.record` decision linked to its claim check, which makes the model's fabrication rate visible. The same quote is stored once. |
+| Niches | `cofactory_propose_niche` (scout) | One buyer × one job × one channel (rules below) |
+| Registry | `server/cofactory/discovery/registry.ts` (`<data>/cofactory-registry.db`) | Which factory holds which niche. Candidate claims expire after 30 days unless they go live. The interface is ready for a hosted registry shared across servers. |
+| Similarity | `server/cofactory/discovery/similarity.ts` | Weighted token Jaccard over buyer (0.45), job (0.45) and channel (0.1), and token-cosine theme overlap between portfolios |
+| Batches | `startBatch` / `closeBatch`; tools `cofactory_profile`, `cofactory_discovery_status`, `cofactory_close_batch`; `POST /api/cofactory/discovery/batches`, `/discovery/close`, `GET /api/cofactory/discovery` | A batch targets 30 niches, with at least 20% boring and 20% cross-field. Closing is refused while it is short. |
+| Scout sessions | `wakeForDiscovery` in the scheduler | While a batch is open and short, the scout gets deep sessions (3 h, 3,000 shadow cents) whose prompt carries the owner's inputs with ids, constraints, seed niches and progress. After 4 sessions a batch raises `discovery_stuck` and stops waking the scout. |
+| Factory staff | `launcher.staffFactory()`; `POST /api/cofactory/factory/staff` | Creates and seats the lead and the scout (rules below) |
+
+**Niche rules (`proposeNiche`):**
+- At least 3 verified signals, from at least 3 different sites and at least 2 kinds of source.
+- At least one signal in buyers' own words: a forum, review, job board, Q&A, social or marketplace page. Added after
+  the live run below.
+- Cites at least one owner input id.
+- A specific gap: why incumbents miss it, in at least 40 characters.
+- Not a near-copy of this factory's own niches (similarity ≥ 0.75).
+- Not held by another factory (similarity ≥ 0.6).
+- Density (how many other factories hold niches within 0.3 similarity) is recorded.
+
+**The scout's standing method** follows the Paul Graham rules:
+- start from the owner's inputs and go deep into one sub-sub-domain;
+- look for observed demand, not plausibility;
+- quote word for word;
+- favour buyers who already pay humans a lot;
+- treat boring work as a moat;
+- name the gap precisely;
+- meet the quotas.
+
+**Deviation from the plan:** the plan said "≥ 3 independent source types per cluster". Code requires 3 sites and 2
+source types, because three distinct source types is rare for an extremely niche market. This is a policy value
+(`DEFAULT_DISCOVERY_POLICY.minSourceTypes`) to revisit once the dossier stage measures how well each setting predicts
+real buyer response.
+
+**Evals (`pnpm cofactory:eval`):**
+
+| Suite | What it checks | Result |
+|---|---|---|
+| `signals` | Real quotes stored; a paraphrase, an invented budget, a script-only quote, a dead page and a too-short quote refused; every stored signal points at a verified check; a repeat stored once | 10/10, `stored_verified` = 1 |
+| `niche-rules` | Too few signals, one site, no owner input, a vague gap and an own near-duplicate refused; a valid niche and a different job accepted; another factory blocked from a held niche | 8/8 |
+| `divergence` | 10 simulated owners whose generators are pulled toward the same 10 popular ideas, as models are. Bar: no cross-factory near-duplicates, mean theme overlap ≤ 0.2, every factory keeps ≥ 4 niches | Overlap 0.043 with the registry vs 0.717 without it; 0 duplicates |
+
+The `divergence` suite tests the mechanism with fixture generators. The same divergence measured across real-model
+owners belongs to the live runs.
+
+**Truth layer change:** PDFs are read now.
+- A regulator's PDF guidance was refused in the live run, because only HTML and plain-text pages were accepted.
+- The evidence store now extracts a PDF's text layer with dusk's own PDF worker, and fetched pages may be up to 10 MB.
+- A PDF with no text layer is `unverifiable`, never `missing`.
+- The claims suite gained a PDF quote that verifies and an altered one that does not (22/22).
+
+**Live smoke (2026-11-17), a real model:**
+- Setup: the worktree server with Claude Code on the owner's sign-in, a synthetic profile (independent pharmacy
+  operations, claims data, Ohio, state compliance), a batch target of 3, and only the scout seated.
+
+| Measure | Result |
+|---|---|
+| Model time | 8.2 min over 2 sessions: 8.0 min to fill the batch, then 0.2 min to close it on the next wake |
+| API-equivalent model cost | $1.29 (shadow, on the subscription) |
+| Signals | 9 stored from 9 sites; 1 refused (a PDF, before the fix above); 0 fabricated quotes |
+| Niches | 3 accepted, all specific (detail below) |
+| Traceability | Every decision traceable; the journal was written in both sessions |
+
+The three niches:
+1. Ohio independent pharmacies: PBM 835 remittance and DIR-fee clawback reconciliation, with the appeals filed.
+2. Small Ohio cannabis operators: DCC training records, SOP upkeep and the annual third-party certification pack.
+3. 340B contract pharmacies and rural covered entities: audit-ready eligibility documentation between HRSA audits.
+
+**What the run taught:**
+- The scout leaned on news, vendor and regulator pages; only 1 of 9 signals was buyers' own words. Under the new
+  buyer-voice rule, 2 of the 3 niches would have been refused, which sends the scout to forums and job boards. Its own
+  journal named the same next step ("Ohio cannabis operator forums/Reddit for direct operator complaints").
+- A complete batch left open is closed by the next scout wake, cheaply.
+
+**Proof:**
+- `server/cofactory/discovery/discovery.test.ts` covers:
+  - similarity and site grouping
+  - profile ids stable across edits
+  - a full batch through the scout's tools, with every decision traceable
+  - scheduler wakes, and `discovery_stuck` after the session allowance
+- Live smoke on a real model: see the progress log.
 
 ### P2 Dossiers and scoring
 Deep-session dossiers, practitioner evidence from the web, the rubric, vetoes and the champion rule.
@@ -362,3 +446,4 @@ A virtual card and model key per company, multiple factories, and calibration re
 - **2026-11-17:** F1 done and F2 core done. Stage gates now read the world. 34 unit tests pass, and `pnpm cofactory:eval` passes. Next: F3, runtime and persistence.
 - **2026-11-17:** F3 done: sessions, journal, company folders, keep-working re-entry, restart recovery, zombie sweep, scheduler (cadence, event and message wakes), alarms and the launcher. 15 runtime tests plus a real-server kill and restart e2e. Next: F4, observability.
 - **2026-11-17:** F4 done: an append-only log of decisions with evidence and cost, tool calls and owner touches; cost by stage; session and company traces; autonomy; the ops board (page, text, CLI). The traceability eval passes at 100%. The board caught a round-start race, now fixed. Foundations F0–F4 are complete. Next: P1, discovery.
+- **2026-11-17:** P1 done: factory profile, verified signals, niche rules, the cross-factory registry, discovery batches and scout sessions, factory staffing; evals for signals, niche rules and divergence (overlap 0.043 with the registry vs 0.717 without). Live smoke on a real model: 3 specific niches from 9 verified signals for $1.29 of model use. Fixes from it: PDFs are now read, and every niche needs buyers' own words. Next: P2, dossiers and scoring.
