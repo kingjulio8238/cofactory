@@ -5,7 +5,7 @@ import type { CompanyRails } from "./rails.ts";
 
 const ready: CompanyRails = {
   mailbox: "hello@tenderwatch.co", stripeSecretKey: "rk_live_abc", stripeWebhookSecret: "whsec_x", formToken: "t",
-  publicHooksUrl: "https://hooks.tenderwatch.co", offerUrl: null, postalAddress: "100 Main St, Columbus, OH 43215",
+  publicHooksUrl: "https://hooks.tenderwatch.co", offerUrl: null, postalAddress: "100 Main St, Columbus, OH 43215", outreachArmed: false,
 };
 
 const dns: Record<string, string[][]> = {

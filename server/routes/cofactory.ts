@@ -198,7 +198,7 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
       const input = parse(z.object({
         mailbox: z.string().email().nullable().optional(), stripeSecretKey: z.string().regex(/^(sk|rk)_(test|live)_[\w]+$/).nullable().optional(),
         stripeWebhookSecret: z.string().regex(/^whsec_[\w]+$/).nullable().optional(), publicHooksUrl: z.string().url().regex(/^https:\/\//).nullable().optional(),
-        postalAddress: z.string().min(10).max(300).nullable().optional(),
+        postalAddress: z.string().min(10).max(300).nullable().optional(), outreachArmed: z.boolean().optional(),
       }));
       if (!input) return;
       const { rails } = deps.validation();

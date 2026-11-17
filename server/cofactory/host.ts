@@ -110,6 +110,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     const mail: MailPort = deps.mailDryRunFile ? dryRunMailPort(deps.mailDryRunFile)
       : deps.email ? duskMailPort(deps.email) : { send: async () => { throw new Error("email is not available on this server"); }, fetchNew: async () => [] };
     const outreach = createOutreach({ sprints, truth: evidence(), mail, mailboxFor: (companyId) => rails.peek(companyId)?.mailbox ?? null, postalAddressFor: (companyId) => rails.peek(companyId)?.postalAddress ?? null, cursor: sprints.cursor,
+      armed: (companyId) => deps.mailDryRunFile !== undefined || rails.peek(companyId)?.outreachArmed === true,
       offerProblem: async (companyId) => {
         const offerUrl = rails.peek(companyId)?.offerUrl;
         if (!offerUrl) return "no offer page is published";

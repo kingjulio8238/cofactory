@@ -17,6 +17,8 @@ export interface CompanyRails {
   offerUrl: string | null;
   /** The business's postal address, set by the owner: shown on the offer page and under every outreach email. */
   postalAddress: string | null;
+  /** The owner's go-ahead for this company to contact real people; nothing is sent while it is off. */
+  outreachArmed: boolean;
 }
 
 type RailsFile = Record<string, CompanyRails>;
@@ -30,13 +32,13 @@ export function openRails(file: string) {
     writeFileAtomic(file, JSON.stringify(data, null, 2), { mode: 0o600 });
     try { chmodSync(file, 0o600); } catch {}
   };
-  const blank = (): CompanyRails => ({ mailbox: null, stripeSecretKey: null, stripeWebhookSecret: null, formToken: randomBytes(18).toString("base64url"), publicHooksUrl: null, offerUrl: null, postalAddress: null });
+  const blank = (): CompanyRails => ({ mailbox: null, stripeSecretKey: null, stripeWebhookSecret: null, formToken: randomBytes(18).toString("base64url"), publicHooksUrl: null, offerUrl: null, postalAddress: null, outreachArmed: false });
 
   return {
     /** The company's rails if it has any; never creates an entry, so public requests cannot grow the file. */
     peek(companyId: string): CompanyRails | null {
       const found = read()[companyId];
-      return found ? { ...found, postalAddress: found.postalAddress ?? null } : null;
+      return found ? { ...found, postalAddress: found.postalAddress ?? null, outreachArmed: found.outreachArmed === true } : null;
     },
     get(companyId: string): CompanyRails {
       const data = read();
@@ -65,7 +67,7 @@ export function openRails(file: string) {
       const rails = this.get(companyId);
       return {
         mailbox: rails.mailbox, stripe: Boolean(rails.stripeSecretKey), stripeWebhook: Boolean(rails.stripeWebhookSecret),
-        publicHooksUrl: rails.publicHooksUrl, offerUrl: rails.offerUrl, postalAddress: rails.postalAddress ?? null,
+        publicHooksUrl: rails.publicHooksUrl, offerUrl: rails.offerUrl, postalAddress: rails.postalAddress ?? null, outreachArmed: rails.outreachArmed === true,
         formAction: rails.publicHooksUrl ? `${rails.publicHooksUrl.replace(/\/$/, "")}/hooks/cofactory/form/${companyId}/${rails.formToken}` : null,
         stripeWebhookUrl: rails.publicHooksUrl ? `${rails.publicHooksUrl.replace(/\/$/, "")}/hooks/cofactory/stripe/${companyId}` : null,
       };

@@ -18,4 +18,5 @@ const checks = await preflightRails(values.company, rails, { resolveTxt, resolve
 for (const check of checks) console.log(`${check.ok ? "ok  " : "FAIL"}  ${check.name.padEnd(22)} ${check.detail}`);
 const failed = checks.filter((check) => !check.ok).length;
 console.log(failed ? `\n${failed} of ${checks.length} checks failed: not ready for a real sprint` : `\nall ${checks.length} checks passed: ready for a real sprint`);
+console.log(rails?.outreachArmed ? "outreach is ARMED: the company may contact real people" : "outreach is not armed: nothing reaches a real person until the owner arms it");
 process.exit(failed ? 1 : 0);

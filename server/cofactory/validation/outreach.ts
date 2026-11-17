@@ -28,7 +28,7 @@ const addressOf = (from: string) => (/<([^>]+)>/.exec(from)?.[1] ?? from).trim()
  * and is logged with its Message-ID so the reply can be matched. Polling turns replies into evidence and honours every
  * "stop" and bounce at once, for good.
  */
-export function createOutreach(deps: { sprints: Sprints; truth: Truth; mail: MailPort; mailboxFor(companyId: string): string | null; postalAddressFor(companyId: string): string | null; offerProblem(companyId: string): Promise<string | null>; cursor: { get(name: string): number; set(name: string, value: number): void } }) {
+export function createOutreach(deps: { sprints: Sprints; truth: Truth; mail: MailPort; mailboxFor(companyId: string): string | null; postalAddressFor(companyId: string): string | null; offerProblem(companyId: string): Promise<string | null>; armed(companyId: string): boolean; cursor: { get(name: string): number; set(name: string, value: number): void } }) {
   const { sprints, truth, mail } = deps;
 
   return {
@@ -40,6 +40,7 @@ export function createOutreach(deps: { sprints: Sprints; truth: Truth; mail: Mai
       const target = sprints.targets(sprintId).find((candidate) => candidate.id === targetId);
       if (!target) return { ok: false, reason: "that buyer is not on this sprint's list" };
       if (target.channel !== "email") return { ok: false, reason: `${target.name} is reached by ${target.channel}, not email` };
+      if (!deps.armed(sprint.companyId)) return { ok: false, reason: "the owner has not yet given the go-ahead to contact real people for this company; prepare the list and drafts, and wait" };
       const giveaway = giveawayProblem(`${input.subject}\n${input.text}`);
       if (giveaway) return { ok: false, reason: giveaway };
       const postal = deps.postalAddressFor(sprint.companyId);

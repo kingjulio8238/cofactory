@@ -29,10 +29,10 @@ export function outreachGateSuite(): Suite {
       const sent: Array<{ to: string; text: string }> = [];
       const cursors = new Map<string, number>();
       const outreach = createOutreach({
-        sprints, truth, mailboxFor: () => "hello@company.test", postalAddressFor: () => "100 Main St, Columbus, OH 43215", offerProblem: async () => null, cursor: { get: (name) => cursors.get(name) ?? 0, set: (name, value) => cursors.set(name, value) },
+        sprints, truth, mailboxFor: () => "hello@company.test", postalAddressFor: () => "100 Main St, Columbus, OH 43215", offerProblem: async () => null, armed: () => true, cursor: { get: (name) => cursors.get(name) ?? 0, set: (name, value) => cursors.set(name, value) },
         mail: { send: async (_box, input) => { sent.push(input); return { messageId: `<m${sent.length}@x>`, rejected: [] }; }, fetchNew: async () => [] },
       });
-      const noPostal = createOutreach({ sprints, truth, mailboxFor: () => "hello@company.test", postalAddressFor: () => null, offerProblem: async () => null, cursor: { get: () => 0, set: () => {} }, mail: { send: async () => { throw new Error("must not send"); }, fetchNew: async () => [] } });
+      const noPostal = createOutreach({ sprints, truth, mailboxFor: () => "hello@company.test", postalAddressFor: () => null, offerProblem: async () => null, armed: () => true, cursor: { get: () => 0, set: () => {} }, mail: { send: async () => { throw new Error("must not send"); }, fetchNew: async () => [] } });
       const failures: string[] = [];
       let correct = 0, total = 0, falseAllowed = 0;
       const expect = (name: string, allowed: boolean, shouldAllow: boolean) => {
@@ -52,10 +52,12 @@ export function outreachGateSuite(): Suite {
         expect("unverifiable page", (await sprints.addTarget(id, { name: "Spa", address: "x@spa.test", channel: "email", sourceUrl: "https://fixtures.cofactory.test/spa" })).ok, false);
         sprints.suppress("owner4@riverside.test", "unsubscribe");
         const send = async (index: number) => (await outreach.send(id, targets[index]!.id, { subject: "Hello", text: "A short note about reconciliation." })).ok;
-        const offline = createOutreach({ sprints, truth, mailboxFor: () => "hello@company.test", postalAddressFor: () => "100 Main St, Columbus, OH 43215", offerProblem: async () => "unreachable", cursor: { get: () => 0, set: () => {} }, mail: { send: async () => { throw new Error("must not send"); }, fetchNew: async () => [] } });
+        const offline = createOutreach({ sprints, truth, mailboxFor: () => "hello@company.test", postalAddressFor: () => "100 Main St, Columbus, OH 43215", offerProblem: async () => "unreachable", armed: () => true, cursor: { get: () => 0, set: () => {} }, mail: { send: async () => { throw new Error("must not send"); }, fetchNew: async () => [] } });
         expect("first contact while the offer page does not load", (await offline.send(id, targets[0]!.id, { subject: "Hello", text: "A short note about reconciliation." })).ok, false);
         at += 5 * DAY;
         expect("week not started before the first contact", sprints.sprint(id)!.endsAt === started.sprint.endsAt, true);
+        const unarmed = createOutreach({ sprints, truth, mailboxFor: () => "hello@company.test", postalAddressFor: () => "100 Main St, Columbus, OH 43215", offerProblem: async () => null, armed: () => false, cursor: { get: () => 0, set: () => {} }, mail: { send: async () => { throw new Error("must not send"); }, fetchNew: async () => [] } });
+        expect("before the owner arms outreach", (await unarmed.send(id, targets[0]!.id, { subject: "Hello", text: "A short note about reconciliation." })).ok, false);
         expect("no postal address on record", (await noPostal.send(id, targets[0]!.id, { subject: "Hello", text: "A short note about reconciliation." })).ok, false);
         expect("a free first month", (await outreach.send(id, targets[0]!.id, { subject: "Free trial: we reconcile your payouts", text: "Send your export and we reconcile it, free for the first month." })).ok, false);
         expect("the first report on us", (await outreach.send(id, targets[0]!.id, { subject: "Reconciliation", text: "Your first report is on us, then $45 a month." })).ok, false);

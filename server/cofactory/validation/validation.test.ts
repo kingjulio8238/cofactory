@@ -26,7 +26,7 @@ function rig(policy = {}) {
     send: async (_mailbox, input) => { sent.push(input); return { messageId: `<m${sent.length}@company.test>`, rejected: [] }; },
     fetchNew: async (_mailbox, after) => inbox.filter((message) => message.uid > after),
   };
-  const outreach = createOutreach({ sprints, truth, mail, mailboxFor: () => "hello@company.test", postalAddressFor: () => "100 Main St, Columbus, OH 43215", offerProblem: async () => null, cursor: { get: (name) => cursors.get(name) ?? 0, set: (name, value) => cursors.set(name, value) } });
+  const outreach = createOutreach({ sprints, truth, mail, mailboxFor: () => "hello@company.test", postalAddressFor: () => "100 Main St, Columbus, OH 43215", offerProblem: async () => null, armed: () => true, cursor: { get: (name) => cursors.get(name) ?? 0, set: (name, value) => cursors.set(name, value) } });
   cleanups.push(() => { sprints.close(); truth.close(); rmSync(dir, { recursive: true, force: true }); });
   const started = sprints.start({ companyId: "c1" });
   if (!started.ok) throw new Error(started.reason);
