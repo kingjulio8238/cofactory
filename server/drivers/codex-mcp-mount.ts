@@ -37,7 +37,7 @@ export function mountMcpServer(
 }
 
 /** The built-in mounts that may be dusk bot's own proxies; a person's server of the same shape stays a process. */
-const OWN_SERVERS = new Set(["agents", "browser", "data", "email", "device"]);
+const OWN_SERVERS = new Set(["agents", "browser", "data", "email", "device", "cofactory"]);
 
 /** The env family holding own-server endpoint tokens and headers; it never reaches Codex's command shell. */
 export const OWN_MCP_ENV_FAMILY = "DUSK_OWN_MCP_";
@@ -81,7 +81,7 @@ export function mountOwnMcpOverHttp(
 
 /** Built-in servers whose calls are independent requests, so one model step's calls to them may run at once. The
  * computer and the browser drive one screen and a person's own server is unknown: those stay one call at a time. */
-const PARALLEL_SERVERS = new Set(["agents", "data", "email", "device", "composio", OWN_APPS_SERVER]);
+const PARALLEL_SERVERS = new Set(["agents", "data", "email", "device", "cofactory", "composio", OWN_APPS_SERVER]);
 /** codex-cli 0.167.0 runs one server's calls one after another unless `supports_parallel_tool_calls` is set. */
 export const PARALLEL_MCP_MIN_CODEX: VersionTriple = [0, 167, 0];
 

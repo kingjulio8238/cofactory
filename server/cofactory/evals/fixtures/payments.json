@@ -1,0 +1,27 @@
+{
+  "context": {
+    "listPriceCents": 9900,
+    "relatedEmails": ["owner@example.com", "ops@cofactory.co"],
+    "relatedDomains": ["cofactory.co", "ownerfamilyfarm.com"],
+    "refunded": ["ch_refunded"]
+  },
+  "cases": [
+    { "id": "clean", "payment": { "externalId": "ch_1", "kind": "payment", "payerEmail": "dana@ruralrx.com", "amountCents": 9900, "testMode": false }, "expect": true },
+    { "id": "half-price", "payment": { "externalId": "ch_2", "kind": "payment", "payerEmail": "kim@compoundrx.com", "amountCents": 4950, "testMode": false }, "expect": true },
+    { "id": "deposit", "payment": { "externalId": "ch_3", "kind": "deposit", "payerEmail": "lee@threestorerx.com", "amountCents": 5000, "testMode": false }, "expect": true },
+    { "id": "under-half", "payment": { "externalId": "ch_4", "kind": "payment", "payerEmail": "sam@ruralrx.com", "amountCents": 4900, "testMode": false }, "expect": false },
+    { "id": "test-mode", "payment": { "externalId": "ch_5", "kind": "payment", "payerEmail": "dana@ruralrx.com", "amountCents": 9900, "testMode": true }, "expect": false },
+    { "id": "refunded", "payment": { "externalId": "ch_refunded", "kind": "payment", "payerEmail": "dana@ruralrx.com", "amountCents": 9900, "testMode": false }, "expect": false },
+    { "id": "owner-paid", "payment": { "externalId": "ch_6", "kind": "payment", "payerEmail": "Owner@Example.com", "amountCents": 9900, "testMode": false }, "expect": false },
+    { "id": "related-domain", "payment": { "externalId": "ch_7", "kind": "payment", "payerEmail": "cousin@ownerfamilyfarm.com", "amountCents": 9900, "testMode": false }, "expect": false },
+    { "id": "factory-account", "payment": { "externalId": "ch_8", "kind": "payment", "payerEmail": "billing@cofactory.co", "amountCents": 9900, "testMode": false }, "expect": false },
+    { "id": "no-payer", "payment": { "externalId": "ch_9", "kind": "payment", "payerEmail": null, "amountCents": 9900, "testMode": false }, "expect": false },
+    { "id": "a-reply-is-not-money", "payment": { "externalId": "m_1", "kind": "reply", "payerEmail": "dana@ruralrx.com", "amountCents": 9900, "testMode": false }, "expect": false },
+    { "id": "free-mail-unrelated", "payment": { "externalId": "ch_10", "kind": "payment", "payerEmail": "rph.jones@gmail.com", "amountCents": 9900, "testMode": false }, "expect": true }
+  ],
+  "distinctPayers": {
+    "payments": ["ch_1", "ch_2", "ch_3", "ch_4", "ch_5", "ch_6", "ch_10"],
+    "expect": 4,
+    "note": "ch_1/ch_2/ch_3/ch_10 count; ch_4 is under half, ch_5 is test mode, ch_6 is the owner"
+  }
+}

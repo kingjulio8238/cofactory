@@ -180,6 +180,8 @@ export interface SendTurnInput {
     email?: { command: string; args: string[]; env: Record<string, string> };
     /** The paired phone's app tools' MCP proxy: the harness holds the jobs and the per-bot verdict. */
     device?: { command: string; args: string[]; env: Record<string, string> };
+    /** Cofactory's books and chain of command, mounted only for a bot that holds a factory or company seat. */
+    cofactory?: { command: string; args: string[]; env: Record<string, string> };
     /** dweb daemon tools; `url` is the dweb HTTP base. */
     dweb?: { url: string };
     /** The user's MCP servers, mounted without any pre-allow; a driver skips a kind it cannot speak. */

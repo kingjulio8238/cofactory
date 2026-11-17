@@ -1,0 +1,22 @@
+[
+  { "id": "exact", "url": "https://fixtures.cofactory.test/forum", "quote": "nobody sells anything that fits a shop our size", "expect": "verified" },
+  { "id": "curly-and-case", "url": "https://fixtures.cofactory.test/forum", "quote": "I'd pay for someone to just send me a clean reconciliation report", "expect": "verified" },
+  { "id": "across-inline-tags", "url": "https://fixtures.cofactory.test/forum", "quote": "Every month I spend two full days matching remits against the PBM statements by hand", "expect": "verified" },
+  { "id": "entities", "url": "https://fixtures.cofactory.test/forum", "quote": "a clean reconciliation report every month & flag the clawbacks", "expect": "verified" },
+  { "id": "smart-quotes-in-page", "url": "https://fixtures.cofactory.test/forum", "quote": "\"Why doesn't someone make a simple monthly service for this?\"", "expect": "verified" },
+  { "id": "elided-in-order", "url": "https://fixtures.cofactory.test/forum", "quote": "We tried a big vendor ... We went back to spreadsheets", "expect": "verified" },
+  { "id": "elided-out-of-order", "url": "https://fixtures.cofactory.test/forum", "quote": "We went back to spreadsheets ... We tried a big vendor", "expect": "missing" },
+  { "id": "elided-tiny-fragment", "url": "https://fixtures.cofactory.test/forum", "quote": "Same here ... tabs", "expect": "missing" },
+  { "id": "paraphrase", "url": "https://fixtures.cofactory.test/forum", "quote": "reconciling DIR fees takes us two days a month and we hate it", "expect": "missing" },
+  { "id": "invented-number", "url": "https://fixtures.cofactory.test/forum", "quote": "The spreadsheet has 60 tabs now", "expect": "missing" },
+  { "id": "only-in-script", "url": "https://fixtures.cofactory.test/forum", "quote": "Our software reconciles every DIR fee automatically for free", "expect": "missing" },
+  { "id": "only-in-comment", "url": "https://fixtures.cofactory.test/forum", "quote": "we would happily pay $5,000 a year for a fix", "expect": "missing" },
+  { "id": "price-exact", "url": "https://fixtures.cofactory.test/pricing", "quote": "Starts at $49 per store per month, billed annually", "expect": "verified" },
+  { "id": "price-altered", "url": "https://fixtures.cofactory.test/pricing", "quote": "Starts at $39 per store per month", "expect": "missing" },
+  { "id": "competitor-gap", "url": "https://fixtures.cofactory.test/pricing", "quote": "Chains of 25 stores or more only", "expect": "verified" },
+  { "id": "link-only", "url": "https://fixtures.cofactory.test/pricing", "quote": null, "expect": "verified" },
+  { "id": "script-rendered", "url": "https://fixtures.cofactory.test/spa", "quote": "Best reconciliation tool we have used", "expect": "unverifiable" },
+  { "id": "dead-link", "url": "https://fixtures.cofactory.test/gone", "quote": "anything at all on this page", "expect": "unreachable" },
+  { "id": "blocked-address", "url": "http://169.254.169.254/latest/meta-data", "quote": null, "expect": "unreachable" },
+  { "id": "not-a-url", "url": "forum post from last week", "quote": "nobody sells anything that fits", "expect": "unreachable" }
+]

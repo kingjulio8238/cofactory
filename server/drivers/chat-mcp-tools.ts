@@ -517,6 +517,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   if (integrations?.data && eligible("data")) servers.push(["data", integrations.data]);
   if (integrations?.email && eligible("email")) servers.push(["email", integrations.email]);
   if (integrations?.device && eligible("device")) servers.push(["device", integrations.device]);
+  if (integrations?.cofactory && eligible("cofactory")) servers.push(["cofactory", integrations.cofactory]);
   const builtIns = servers.length;
   const besideBrowser = servers.some(([, descriptor]) => descriptor === integrations?.browser);
   for (const [name, server] of Object.entries(integrations?.custom ?? {})) {

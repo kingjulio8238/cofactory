@@ -88,6 +88,7 @@ import { keyHint, keyStatus, nestedKeyStatus, withoutKeyHints } from "./key-hint
 import { chartRenderer, compileChart, dataEngine, validateVegaLite } from "./data/deps.ts";
 import { BUILT_IN_DATA_SYSTEM_PROMPT } from "./data/instructions.ts";
 import { DATA_INTERNAL_MCP_PATH, dataRpc } from "./data/rpc.ts";
+import { COFACTORY_INTERNAL_MCP_PATH, createCofactoryHost } from "./cofactory/host.ts"; import { createCofactoryRoutes } from "./routes/cofactory.ts";
 import { APP_TOKENS_MCP_PREFIX, createTokenApps } from "./app-tokens/service.ts"; import { appActionCard, McpToolHints, toolCallFactsFromSummary } from "./mcp-tool-hints.ts"; import { tokenApp } from "../shared/app-tokens.ts"; import { remoteMcpAppFor } from "./remote-mcp-label.ts"; import { createEmailRoutes } from "./routes/email.ts"; import { createEmailHost, EMAIL_INTERNAL_MCP_PATH } from "./email/host.ts"; import { createEmailService } from "./email/service.ts"; import { createSlackHost } from "./slack/host.ts";
 import { createPhones } from "./host/phones.ts"; import { createDevices } from "./host/devices.ts";
 import { desktopPhonesOffered, NOT_THE_OWNER } from "./phones/owner.ts";
@@ -1385,7 +1386,7 @@ const attributeUsage = createUsageAttribution({ threadTrigger: (threadId) => tur
   const toolNames = usageTrace.toolNames(row.threadId), turnDetail = usageTrace.turnDetail(row.threadId);
   const booked = attributeUsage({ ...row, ...cost, ...usageTrace.settle(row.threadId), at: new Date().toISOString() });
   noteUsageTurn(booked, toolNames, turnDetail);
-  void appendUsage(DATA_DIR, booked); const entry = spend.booked(booked); if (entry) routineHost.allowance.booked(entry);
+  void appendUsage(DATA_DIR, booked); const entry = spend.booked(booked); if (entry) { routineHost.allowance.booked(entry); cofactory.costBooked(entry); }
 }
 
 const appSignIns = createAppSignIns();
@@ -1619,7 +1620,7 @@ type InternalCapability = {
   threadId: string;
   generation: string;
   depth: number;
-  kind: "agents" | "connectors" | "computer" | "browser" | "hooks" | "phone" | "data" | "email" | "device";
+  kind: "agents" | "connectors" | "computer" | "browser" | "hooks" | "phone" | "data" | "email" | "device" | "cofactory";
   skillAuthoring: boolean;
   createdBots: number;
   createdRooms?: number;
@@ -2452,6 +2453,8 @@ function dataIntegration(botId: string, turn: { threadId: string; generation: st
     },
   };
 }
+const cofactory = createCofactoryHost({ dataDir: DATA_DIR, proxy: { command: process.execPath, script: SPAWNED_PROXIES.harnessMcp, env: AGENTS_NODE_FLAG }, harnessUrl: () => `http://127.0.0.1:${PORT}`, tokenEnv: harnessMcpTokenEnv("cofactory"),
+  mint: (botId, turn) => mintInternalCapability({ botId, ...turn, kind: "cofactory", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 }) });
 const emailIntegration = (bot: BotRecord, turn: { threadId: string; generation: string }) => emailHost.integration(bot, () => mintInternalCapability({ botId: bot.id, ...turn, kind: "email", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 }), `http://127.0.0.1:${PORT}`);
 
 let browserEngineInstall: Promise<void> | null = null;
@@ -9237,6 +9240,7 @@ async function beginTurn(
       if (liveBot && instance.adapter.capabilities.dataMcp === true) {
         const data = dataIntegration(bot.id, { threadId, generation: dispatchClaimId });
         if (data) integrations.data = data;
+        const seat = cofactory.integration(bot.id, { threadId, generation: dispatchClaimId }); if (seat) integrations.cofactory = seat;
       }
       if (liveBot && instance.adapter.capabilities.emailMcp === true) { const mail = emailIntegration(liveBot, { threadId, generation: dispatchClaimId }); if (mail) integrations.email = mail; }
       const phone = liveBot && instance.adapter.capabilities.deviceMcp === true ? phones.integration(liveBot, { threadId, generation: dispatchClaimId }) : null;
@@ -9316,7 +9320,7 @@ async function beginTurn(
         { id: "composio", label: "Connected apps", text: integrations.composio ? composioSystemPrompt(liveBot?.connectorTools ?? bot.connectorTools, Boolean(integrations.browser)) + describeConnectorScopes((liveBot ?? bot).connectorScopes) : "" },
         { id: "mcp", label: "MCP servers", text: mcpPrompt(bot, integrations.custom ?? {}) }, { id: "to-connect", label: "Connections to make", text: cloudConnections.prompt(liveBot ?? bot) + teamConnections.prompt(threadId, dispatchClaimId, integrations) },
         { id: "browser", label: "Browser", text: integrations.browser ? browserPromptFor(bot, Boolean(integrations.agents)) : "" },
-        { id: "data", label: "Data", text: integrations.data ? BUILT_IN_DATA_SYSTEM_PROMPT : "" },
+        { id: "data", label: "Data", text: integrations.data ? BUILT_IN_DATA_SYSTEM_PROMPT : "" }, { id: "cofactory", label: "Cofactory", text: integrations.cofactory ? cofactory.prompt(bot.id) : "" },
         { id: "email", label: "Email", text: instance.adapter.capabilities.emailMcp === true ? emailHost.prompt(liveBot ?? bot) : "" },
         ...phones.promptParts(liveBot ?? bot, {
           mounted: Boolean(integrations.device), offered: instance.adapter.capabilities.deviceMcp === true, turn: { botId: bot.id, threadId, generation: dispatchClaimId },
@@ -10427,6 +10431,7 @@ const appTriggers = createAppTriggerHost({ store, webhooks, webhookBase: () => w
 tieAutomationsToBots(store, { routines: routines!, webhooks, apps: appTriggers.manager, waits: botWaits });
 ROUTES.push(appTriggers.routes); ROUTES.unshift(createMoveFreezeRoutes({ freeze: moveFreeze, owner: (auth) => ownHome.owner(auth), automationsOff: () => switchAutomationsOff({ routines: () => routines, webhooks: () => webhooks, appEvents: () => appTriggers.manager, waits: () => botWaits }), restart: () => { restartRequested = true; gracefulShutdown(); }, busy: createMoveWaits({ bots: () => store.bots, rooms: () => store.groups, answering: (id) => watchdog.answering(id), turn: botHasActiveTurn, runs: () => routines?.listRuns() ?? [], roomWorking: (id) => { const group = store.group(id); return Boolean(group && groupIsWorking(group)); }, handoffs: () => coordinator.active(), exists: (node) => !(!node.parentId && node.groupId ? roomRootProblem(node) : roomHandoffProblem(node)), signingIn: () => providerAuthSessions.active }) }));
 // before the freeze: a frozen copy is still its owner's to delete
+ROUTES.push(createCofactoryRoutes({ books: cofactory.books, evidence: cofactory.evidence, owner: (auth) => auth.scopes.includes("admin") && !(auth.kind === "loopback" && auth.trust === "service"), botExists: (id) => Boolean(store.bot(id)) }));
 ROUTES.unshift(createStartFreshRoutes({ dataDir: DATA_DIR, owner: (auth) => ownHome.owner(auth), managed: () => CLOUD_HOME !== null || Boolean(process.env.DUSK_CLOUD_ROLE), restart: () => { restartRequested = true; gracefulShutdown(); } }));
 ROUTES.push(createLimitResetRoutes({ clock: limitClock, routines: routines!, requests: routineRequests, engineName, threadEngine: (botId, threadId) => turnSelection(botId, threadId)?.instanceId,
   threadTitle: (botId, threadId) => store.bot(botId) && !store.bot(botId)!.hidden ? store.taskByThread(botId, threadId)?.title ?? null : null,
@@ -10933,6 +10938,7 @@ async function runClaimedGroupMemberTurn(
   if (instance.adapter.capabilities.dataMcp === true) {
     const data = dataIntegration(readyBot.id, { threadId, generation: internalGeneration });
     if (data) integrations.data = data;
+    const seat = cofactory.integration(readyBot.id, { threadId, generation: internalGeneration }); if (seat) integrations.cofactory = seat;
   }
   if (instance.adapter.capabilities.emailMcp === true) { const mail = emailIntegration(readyBot, { threadId, generation: internalGeneration }); if (mail) integrations.email = mail; }
   const phone = instance.adapter.capabilities.deviceMcp === true ? phones.integration(readyBot, { threadId, generation: internalGeneration }) : null;
@@ -11154,7 +11160,7 @@ async function runClaimedGroupMemberTurn(
     { id: "plan", label: "Surface", text: surfacePrompt({ computer: roomTeamComputer ? "cloud" : roomVmTarget ? "vm" : surfaceOfComputerKind(roomComputerKind), browser: Boolean(integrations.browser) }, { note: roomPlan.note, cloudHome: Boolean(CLOUD_HOME), browserInComputerTab }) },
     { id: "cloud-home", label: "My Cloud", text: CLOUD_HOME ? cloudHomePrompt(syncedFolders(DATA_DIR)) : "" },
     { id: "browser", label: "Browser", text: integrations.browser ? browserPromptFor(bot, Boolean(integrations.agents)) : "" },
-    { id: "data", label: "Data", text: integrations.data ? BUILT_IN_DATA_SYSTEM_PROMPT : "" },
+    { id: "data", label: "Data", text: integrations.data ? BUILT_IN_DATA_SYSTEM_PROMPT : "" }, { id: "cofactory", label: "Cofactory", text: integrations.cofactory ? cofactory.prompt(readyBot.id) : "" },
     { id: "email", label: "Email", text: instance.adapter.capabilities.emailMcp === true ? emailHost.prompt(readyBot) : "" },
     ...phones.promptParts(readyBot, {
       mounted: Boolean(integrations.device), offered: instance.adapter.capabilities.deviceMcp === true,
@@ -13990,6 +13996,7 @@ const handleRequestInner = async (req: IncomingMessage, res: ServerResponse) => 
         ? "browser"
         : path === DATA_INTERNAL_MCP_PATH
         ? "data"
+        : path === COFACTORY_INTERNAL_MCP_PATH ? "cofactory"
         : path === EMAIL_INTERNAL_MCP_PATH ? "email"
         : path === PHONE_INTERNAL_MCP_PATH
         ? "device"
@@ -14263,6 +14270,7 @@ const handleRequestInner = async (req: IncomingMessage, res: ServerResponse) => 
           },
         }) });
       }
+      if (method === "POST" && path === COFACTORY_INTERNAL_MCP_PATH) return json(res, 200, { result: await cofactory.rpc(await readInternalBody(), { botId: internalSender.id, botName: internalSender.name, assertActive: requireActiveInternalCapability }) });
       // The CRM tokens stay here; the agent process holds only the turn's capability, and every call gets the live bot's verdict.
       if (method === "POST" && path === EMAIL_INTERNAL_MCP_PATH) { return json(res, 200, { result: await emailHost.handle(await readInternalBody(), internalCapability, requireActiveInternalCapability) }); }
       if (method === "POST" && path === PHONE_INTERNAL_MCP_PATH) {
