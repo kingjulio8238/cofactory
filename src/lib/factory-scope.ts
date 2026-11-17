@@ -1,6 +1,7 @@
 // Which part of the factory the window shows: the factory itself (its lead and scout, and the owner's own bots) or one
 // company (its crew alone). The company rail sets it; the sidebar lists only the bots in scope.
 import { useSyncExternalStore } from "react";
+import { isCofactorySection } from "../../shared/cofactory/sections";
 
 export type FactoryScope = { kind: "all" } | { kind: "factory"; companyBots: readonly string[] } | { kind: "company"; companyId: string; bots: readonly string[] };
 
@@ -34,8 +35,18 @@ export function inFactoryScope(current: FactoryScope, botId: string): boolean {
   return !current.companyBots.includes(botId);
 }
 
-/** The sidebar's filter for the current scope. */
-export function useScopeFilter(): (botId: string) => boolean {
+/** The sidebar's filter for the current scope: which bots it lists, and which of its sections. */
+export interface ScopeFilter {
+  (botId: string): boolean;
+  section: (name: string, shown: ReadonlyArray<{ section?: string | null }>) => boolean;
+}
+
+/** Whether a sidebar section shows: a Cofactory section with none of its crew in scope is hidden, the owner's own stay. */
+export function sectionInScope(current: FactoryScope, name: string, shown: ReadonlyArray<{ section?: string | null }>): boolean {
+  return current.kind === "all" || !isCofactorySection(name) || shown.some((bot) => bot.section === name);
+}
+
+export function useScopeFilter(): ScopeFilter {
   const current = useFactoryScope();
-  return (botId) => inFactoryScope(current, botId);
+  return Object.assign((botId: string) => inFactoryScope(current, botId), { section: (name: string, shown: ReadonlyArray<{ section?: string | null }>) => sectionInScope(current, name, shown) });
 }

@@ -929,7 +929,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   const { primary, unsectionedChief, sectionChiefs, sectionedBots, unsectionedBots } = saved;
   const { botChats, sectionedRooms, unsectionedRooms } = partitionSidebarGroups(visibleGroups);
 
-  const sectionNames: string[] = [...(state.sections ?? []).filter((name) => !q || name.toLowerCase().includes(q.toLowerCase())), ...botDrag.pending];
+  const sectionNames: string[] = [...(state.sections ?? []).filter((name) => (!q || name.toLowerCase().includes(q.toLowerCase())) && inScope.section(name, matchingBots)), ...botDrag.pending];
   for (const bot of sectionedBots) {
     if (!sectionNames.includes(bot.section!)) sectionNames.push(bot.section!);
   }

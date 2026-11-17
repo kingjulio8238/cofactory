@@ -1,3 +1,4 @@
+import { cofactorySection } from "../../../shared/cofactory/sections.ts";
 import type { Company, CompanyRole, FactoryRole } from "../../../shared/cofactory/types.ts";
 import type { Book, Result } from "../book.ts";
 import type { Workspaces } from "./workspace.ts";
@@ -144,21 +145,34 @@ export function createLauncher(deps: LauncherDeps) {
       for (const seat of FACTORY_SEATS) {
         const existing = deps.book.members().find((member) => member.companyId === null && member.role === seat.role);
         if (existing) { staffed.push({ role: seat.role, botId: existing.botId, created: false }); continue; }
-        const botId = await deps.createBot({ name: seat.name, instructions: seat.instructions, section: "Cofactory · Factory", look: ROLE_LOOKS[seat.role] });
+        const botId = await deps.createBot({ name: seat.name, instructions: seat.instructions, section: cofactorySection(null), look: ROLE_LOOKS[seat.role] });
         deps.book.seat({ botId, role: seat.role, companyId: null });
         staffed.push({ role: seat.role, botId, created: true });
       }
       return staffed;
     },
 
+    /** Why a dossier cannot launch a company, checked before the owner is asked and again at launch; null when it can. */
+    dossierProblem(dossierId: string): string | null {
+      const store = deps.discovery?.store;
+      const dossier = store?.dossier(dossierId);
+      if (!store || !dossier) return "no such dossier";
+      if (dossier.status !== "shortlisted" && dossier.status !== "championed") return `only a shortlisted or championed dossier launches a company (this one is ${dossier.status})`;
+      const niche = store.niche(dossier.nicheId)!;
+      if (niche.status === "claimed") {
+        const company = deps.book.companies().find((candidate) => store.linkOf(candidate.id)?.nicheId === niche.id);
+        return `this niche is already a company${company ? ` (${company.name}, ${company.status})` : ""}`;
+      }
+      return null;
+    },
     async launch(input: { name: string; brief: string; capCents: number; dossierId?: string }, actor: string, playbook: Playbook = NICHE_PLAYBOOK): Promise<Result<{ company: Company; team: Array<{ role: CompanyRole; botId: string }> }>> {
       let brief = input.brief;
       let link: { nicheId: string; dossierId: string } | null = null;
       if (input.dossierId) {
-        const store = deps.discovery?.store;
-        const dossier = store?.dossier(input.dossierId);
-        if (!store || !dossier) return { ok: false, reason: "no such dossier" };
-        if (dossier.status !== "shortlisted" && dossier.status !== "championed") return { ok: false, reason: `only a shortlisted or championed dossier launches a company (this one is ${dossier.status})` };
+        const problem = this.dossierProblem(input.dossierId);
+        if (problem) return { ok: false, reason: problem };
+        const store = deps.discovery!.store;
+        const dossier = store.dossier(input.dossierId)!;
         const niche = store.niche(dossier.nicheId)!;
         brief = `${briefFromDossier(niche, dossier)}${input.brief.trim() ? `\n${input.brief.trim()}` : ""}`;
         link = { nicheId: niche.id, dossierId: dossier.id };
@@ -174,7 +188,7 @@ export function createLauncher(deps: LauncherDeps) {
       await deps.workspaces.ensure(company.id, fill(playbook.brief, company));
       const team: Array<{ role: CompanyRole; botId: string }> = [];
       for (const seat of playbook.seats) {
-        const botId = await deps.createBot({ name: `${company.name} · ${ROLE_NAMES[seat.role]}`, instructions: fill(seat.instructions, company), section: `Cofactory · ${company.name}`, look: companySeatLook(seat.role, company.id) });
+        const botId = await deps.createBot({ name: `${company.name} · ${ROLE_NAMES[seat.role]}`, instructions: fill(seat.instructions, company), section: cofactorySection(company.name), look: companySeatLook(seat.role, company.id) });
         const seated = deps.book.seat({ botId, role: seat.role, companyId: company.id });
         if (!seated.ok) return seated;
         team.push({ role: seat.role, botId });

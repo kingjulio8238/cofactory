@@ -109,16 +109,30 @@ describe("a factory's whole life on a real dusk server, every seat scripted", ()
       return latest?.status === "shortlisted" ? latest.id : null;
     });
 
+    const reopened = await call("POST", "/api/cofactory/factory/open", {});
+    expect(reopened.territories, "opening again, as a reloaded onboarding does, keeps the territories").toEqual(opened.territories);
+    expect((await call("GET", "/api/cofactory/discovery")).batches, "and starts no second first search").toHaveLength(1);
+
     // 3. the lead asks to launch from it; nothing launches until the owner approves in Needs you
     routes({ "Factory lead ·": [tool("cofactory_launch_company", { name: "Riverside Recon", cap_cents: 5_000, dossier_id: dossierId }), ...ending("asked the owner to launch Riverside Recon")] });
     const approval = await until("the launch request", async () => (await call("GET", "/api/cofactory/approvals")).approvals?.find((item: { kind: string }) => item.kind === "launch"));
-    expect((await call("GET", `/api/cofactory/seat/${scout}`)).needsYou.approvals.map((item: { title: string }) => item.title)).toEqual(["Start Riverside Recon?"]);
+    const needsYou = (await call("GET", `/api/cofactory/seat/${scout}`)).needsYou;
+    expect(needsYou.approvals.map((item: { title: string }) => item.title)).toEqual(["Start Riverside Recon?"]);
+    expect(needsYou.alarms, "the lead's own alarms never ask the owner").toEqual([]);
     expect((await call("GET", "/api/cofactory/state")).companies).toHaveLength(0);
     routes({});
     const approved = await call("POST", `/api/cofactory/approvals/${approval.id}`, { decision: "approve" });
     expect(approved.outcome).toContain("Riverside Recon is launched");
     const company = (await call("GET", "/api/cofactory/state")).companies[0] as { id: string; brief: string };
+    routes({ "Factory lead ·": [tool("cofactory_launch_company", { name: "Riverside Recon", cap_cents: 5_000, dossier_id: dossierId }), ...ending("asked again")] });
+    await until("the second ask refused", async () => ((await call("GET", "/api/cofactory/decisions")).decisions as Array<{ kind: string; reason: string }>)
+      .some((d) => d.kind === "company.launch" && d.reason.includes("this niche is already a company (Riverside Recon, live)")));
+    routes({});
+    expect((await call("GET", "/api/cofactory/approvals")).approvals, "a launched dossier never asks the owner twice").toEqual([]);
     expect(company.brief, "the dossier carried into the brief").toContain("Buyer: independent pharmacies in Ohio.");
+    const ceoSeat = (await call("GET", "/api/cofactory/rail")).companies[0].ceoBotId as string;
+    const asked = await until("the rails the owner still owes", async () => (await call("GET", `/api/cofactory/seat/${ceoSeat}`)).needsYou.alarms[0]?.detail as string | undefined);
+    expect(asked).toBe("Connect a mailbox to send from, a postal address, a public HTTPS address for the intake, a Stripe key, the Stripe webhook secret so it can take customers. Everything else goes ahead.");
     const rail = await call("GET", "/api/cofactory/rail");
     expect(rail.companies.map((item: { name: string; botIds: string[] }) => [item.name, item.botIds.length])).toEqual([["Riverside Recon", 3]]);
 
@@ -157,21 +171,21 @@ describe("a factory's whole life on a real dusk server, every seat scripted", ()
     const order = await until("the order", async () => ((await call("GET", `/api/cofactory/orders?company=${company.id}`)).companies[0].orders as Array<{ id: string; status: string }>)[0]);
     expect(order).toMatchObject({ status: "open", customer: "owner1@riverside.test", amountCents: 15_000 });
 
-    // 7. the builder's work lands in the company folder with its runbook, and the CEO records the delivery
+    // 7. the builder's work lands in the company folder with its runbook
     const folder = join(dataDir, "cofactory-companies", company.id);
     writeFileSync(join(folder, "report.md"), "# October DIR fees\nEvery fee matched to its claim; three above contract, appeal by Nov 30.\n");
     writeFileSync(join(folder, "RUNBOOK.md"), `# Serving an order\n${"1. Download the remits from the PBM portal the customer names. 2. Match each DIR fee to its claim by Rx number and fill date. 3. Flag fees above the contract rate. 4. Write report.md with totals, flagged lines and appeal deadlines. 5. Email it with cofactory_message_customer and record the delivery.\n".repeat(2)}`);
-    routes({ "CEO ·": [tool("cofactory_deliver_order", { order_id: order.id, summary: "October reconciliation delivered as report.md", deliverable: "report.md" }), ...ending("delivered the first order")] });
-    await until("the delivery", async () => ((await call("GET", `/api/cofactory/orders?company=${company.id}`)).companies[0].orders as Array<{ status: string }>)[0]?.status === "delivered");
-
-    // 8. a stand-in serves the order again from the handoff packet alone, and the lead judges it
-    const rehearsal = await until("the stand-in's rehearsal", async () => ((await call("GET", `/api/cofactory/orders?company=${company.id}`)).companies[0].rehearsals as Array<{ id: string; dir: string; status: string }>)[0]);
-    expect(readFileSync(join(rehearsal.dir, "ORDER.md"), "utf8")).toContain("owner1@riverside.test");
-    writeFileSync(join(rehearsal.dir, "report.md"), "# October DIR fees (stand-in)\nSame totals, same flagged lines, same deadlines.\n");
+    // 8. a stand-in serves the order again from the handoff packet alone, and the lead judges it; both are scripted with
+    //    the delivery, since the stand-in starts the moment the order is delivered (a scripted seat writes no files, so it
+    //    hands back the packet's own order sheet)
     routes({
-      "Stand-in ·": [tool("cofactory_deliver_order", { order_id: order.id, summary: "Served October again from the packet", deliverable: "report.md", rehearsal: true }), ...ending("delivered the rehearsal")],
+      "CEO ·": [tool("cofactory_deliver_order", { order_id: order.id, summary: "October reconciliation delivered as report.md", deliverable: "report.md" }), ...ending("delivered the first order")],
+      "Stand-in ·": [tool("cofactory_deliver_order", { order_id: order.id, summary: "Served October again from the packet", deliverable: "ORDER.md", rehearsal: true }), ...ending("delivered the rehearsal")],
       "Factory lead ·": [tool("cofactory_rehearsal_verdict", { company_id: company.id, passed: true, note: "Same totals and flags as the original; a customer would accept it." }), ...ending("judged the rehearsal")],
     });
+    await until("the delivery", async () => ((await call("GET", `/api/cofactory/orders?company=${company.id}`)).companies[0].orders as Array<{ status: string }>)[0]?.status === "delivered");
+    const rehearsal = await until("the stand-in's rehearsal", async () => ((await call("GET", `/api/cofactory/orders?company=${company.id}`)).companies[0].rehearsals as Array<{ id: string; dir: string; status: string }>)[0]);
+    expect(readFileSync(join(rehearsal.dir, "ORDER.md"), "utf8")).toContain("owner1@riverside.test");
     const gate = await until("the first-dollar gate", async () => {
       const view = (await call("GET", `/api/cofactory/orders?company=${company.id}`)).companies[0];
       return view.firstDollar.reached ? view.firstDollar : null;

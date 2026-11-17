@@ -679,6 +679,8 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
       }
       const input = { name: args.name, brief: args.brief, capCents: args.cap_cents, ...(args.dossier_id ? { dossierId: args.dossier_id } : {}) };
       if (input.dossierId && !launcher) return refused("launching from a dossier needs the runtime");
+      const problem = input.dossierId ? launcher!.dossierProblem(input.dossierId) : null;
+      if (problem) { decide(ctx, "company.launch", "refused", `${args.name}: ${problem}`, [], null); return refused(problem); }
       if (ctx.approvals && ctx.settings?.().approvals.launch === "ask") {
         const approval = ctx.approvals.request({ kind: "launch", companyId: null, title: `Start ${args.name}?`,
           detail: `${dollarsOf(args.cap_cents)} to start${args.dossier_id ? ", from a shortlisted dossier" : ""}. ${args.brief.trim().slice(0, 300)}`.trim(),

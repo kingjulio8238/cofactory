@@ -7,10 +7,28 @@ import type { Orders } from "./validation/orders.ts";
 import type { Rails } from "./validation/rails.ts";
 import type { Sprints } from "./validation/sprints.ts";
 import type { Approvals } from "./approvals.ts";
+import type { Alarm } from "../../shared/cofactory/runtime.ts";
 
 const DAY_MS = 24 * 60 * 60_000;
 
 export type ChecklistState = "done" | "running" | "todo";
+
+/**
+ * An alarm as the owner reads it, or null for one only the lead acts on (a seat's missing journal, a stuck search, a
+ * failed sprint): those wake the lead and never ask the owner.
+ */
+export function ownerAlarm(alarm: Pick<Alarm, "kind" | "companyId">, rails: Pick<Rails, "missing">, companyName?: string): string | null {
+  switch (alarm.kind) {
+    case "rails_missing": {
+      const missing = alarm.companyId ? rails.missing(alarm.companyId) : [];
+      return missing.length ? `Connect ${missing.join(", ")} so ${companyName ?? "it"} can take customers. Everything else goes ahead.` : null;
+    }
+    case "daily_ceiling": return "Today's AI use reached your daily limit. Work starts again tomorrow, or raise the limit in settings.";
+    case "mail_failed": return "The mailbox could not be read. Check its connection so replies are not missed.";
+    case "order_overdue": return `A paying customer's order${companyName ? ` at ${companyName}` : ""} is overdue.`;
+    default: return null;
+  }
+}
 
 /** What a seated bot's Factory tab shows: what it is doing now, and the factory or company it works for. */
 export function seatView(deps: {
@@ -37,7 +55,10 @@ export function seatView(deps: {
   const needsYou = {
     approvals: (deps.approvals?.pending(seat.companyId === null ? undefined : seat.companyId) ?? []).map((approval) => ({ id: approval.id, kind: approval.kind, title: approval.title, detail: approval.detail, at: approval.at })),
     inbox: book.inbox("owner", seat.companyId, 5).map((message) => ({ id: message.id, at: message.at, type: message.type, goal: message.brief.goal })),
-    alarms: (runtime?.openAlarms(seat.companyId ?? undefined) ?? []).map((alarm) => ({ kind: alarm.kind, detail: alarm.detail, raisedAt: alarm.raisedAt })),
+    alarms: (runtime?.openAlarms(seat.companyId ?? undefined) ?? []).flatMap((alarm) => {
+      const detail = ownerAlarm(alarm, rails, seat.companyId === null && alarm.companyId ? book.company(alarm.companyId)?.name : undefined);
+      return detail ? [{ kind: alarm.kind, detail, raisedAt: alarm.raisedAt }] : [];
+    }),
   };
 
   if (seat.companyId === null) {

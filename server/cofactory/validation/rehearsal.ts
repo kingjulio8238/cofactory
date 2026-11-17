@@ -1,3 +1,4 @@
+import { cofactorySection } from "../../../shared/cofactory/sections.ts";
 import { copyFileSync, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -66,7 +67,7 @@ export function createRehearsals(deps: RehearsalDeps) {
     mkdirSync(dir, { recursive: true });
     for (const name of PACKET_FILES) if (existsSync(join(folder, name))) copyFileSync(join(folder, name), join(dir, name));
     writeFileSync(join(dir, "ORDER.md"), orderSheet(order, deps.truth));
-    const botId = await deps.createBot({ name: `${company.name} · Stand-in`, instructions: STAND_IN_INSTRUCTIONS.replaceAll("{company}", company.name), section: `Cofactory · ${company.name}`, look: companySeatLook("operator", company.id) });
+    const botId = await deps.createBot({ name: `${company.name} · Stand-in`, instructions: STAND_IN_INSTRUCTIONS.replaceAll("{company}", company.name), section: cofactorySection(company.name), look: companySeatLook("operator", company.id) });
     const seated = book.seat({ botId, role: "operator", companyId: company.id });
     if (!seated.ok) return null;
     const rehearsal = orders.startRehearsal({ companyId: company.id, orderId: order.id, botId, dir });

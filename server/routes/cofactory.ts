@@ -22,7 +22,7 @@ import type { Rails } from "../cofactory/validation/rails.ts";
 import type { Sprints } from "../cofactory/validation/sprints.ts";
 import type { Orders } from "../cofactory/validation/orders.ts";
 import type { Settings } from "../cofactory/settings.ts";
-import { seatView } from "../cofactory/seat-view.ts";
+import { ownerAlarm, seatView } from "../cofactory/seat-view.ts";
 import type { Approval, Approvals } from "../cofactory/approvals.ts";
 import { drawTerritories, territoryCode, territoryText } from "../cofactory/discovery/territories.ts";
 import { PROFILE_FIELDS } from "../../shared/cofactory/discovery.ts";
@@ -142,10 +142,10 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
       }
       if (path === "/api/cofactory/rail") {
         const approvals = deps.approvals?.store().pending() ?? [];
-        const alarms = runtime?.store.openAlarms() ?? [];
+        const { rails } = deps.validation();
+        const alarms = (runtime?.store.openAlarms() ?? []).filter((alarm) => ownerAlarm(alarm, rails) !== null);
         const members = book.members();
         const needs = (companyId: string | null) => approvals.filter((approval) => approval.companyId === companyId).length + alarms.filter((alarm) => alarm.companyId === companyId).length;
-        const { rails } = deps.validation();
         return json(res, 200, {
           onboarded: Boolean(deps.settings?.get().onboardedAt),
           factory: {
@@ -335,7 +335,7 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
       const staffed = await runtime.launcher.staffFactory();
       const lead = staffed.find((seat) => seat.role === "lead");
       if (lead) deps.factoryOpened?.(lead.botId);
-      const batch = discovery.store.openBatch() ? null : discovery.startBatch("the factory's first search", Number(process.env.COFACTORY_FIRST_SEARCH_NICHES) || FIRST_SEARCH_NICHES);
+      const batch = settings.onboardedAt || discovery.store.openBatch() ? null : discovery.startBatch("the factory's first search", Number(process.env.COFACTORY_FIRST_SEARCH_NICHES) || FIRST_SEARCH_NICHES);
       if (batch?.ok) void deps.tick();
       deps.settings.set({ onboardedAt: settings.onboardedAt ?? now() });
       record(null, "factory_open", `${staffed.length} seats, ${territories.length} territories`);
