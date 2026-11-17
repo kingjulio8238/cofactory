@@ -1,4 +1,4 @@
-import { productName } from "@/lib/brand";
+import { cloudName, productName } from "@/lib/brand";
 import { en, loadLocalePack, localeChoices, localePacks, locales, type LocaleKey, type LocalePack } from "@/locales";
 
 export function resolveLocale(tag: string | undefined, available: ReadonlySet<string>): string {
@@ -100,6 +100,6 @@ export function t(key: LocaleKey, params?: Record<string, string | number>): str
   const template = activePack[key] ?? en[key];
   if (!params && !template.includes("{")) return template;
   return template.replace(/\{(\w+)\}/g, (match, name: string) =>
-    params && name in params ? String(params[name]) : name === "app" ? productName() : name === "device" ? deviceWord() : match,
+    params && name in params ? String(params[name]) : name === "app" ? productName() : name === "cloud" ? cloudName() : name === "device" ? deviceWord() : match,
   );
 }

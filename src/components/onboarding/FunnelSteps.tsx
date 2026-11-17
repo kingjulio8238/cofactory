@@ -17,7 +17,7 @@ import { usePrefersReducedMotion } from "../mascot-clock";
 import { Art, type ArtName } from "../ui/Art";
 import { PlaceArt, type PlaceArtName } from "../ui/PlaceArt";
 import { Toggle } from "../ui/Toggle";
-import { DEFAULT_BOT_NAME } from "@/lib/default-bot";
+import { productName } from "@/lib/brand";
 import { MAC_TRAFFIC_LIGHT_CLEAR_X, useDesktopCapabilities } from "../DesktopCapabilities";
 import phoneHome from "../../assets/onboarding/phone-home.webp";
 import { friendlyError } from "@/lib/plain-error";
@@ -145,7 +145,7 @@ export function WelcomeStep({ onStart, cloud, copy }: { onStart: () => void; clo
   const reduced = usePrefersReducedMotion();
   const art = cloud?.picture
     ? <img src={cloud.picture} alt="" data-welcome-picture="" className="size-[72px] rounded-full object-cover" />
-    : <MausAvatar color="purple" gradient={BRAND_LILAC} size={72} state="excited" animated={!reduced} label={DEFAULT_BOT_NAME} />;
+    : <MausAvatar color="purple" gradient={BRAND_LILAC} size={72} state="excited" animated={!reduced} label={productName()} />;
   return (
     <div className="flex min-h-full w-full flex-col">
       <StepFrame
@@ -185,7 +185,7 @@ export function PlaceStep({ onMac, onCloud, onServer, cloudTag, cloudNote, copy 
   const reduced = usePrefersReducedMotion();
   return (
     <StepFrame title={copy?.title ?? t("funnel.place.title")} sub={copy?.sub ?? t("funnel.place.hello")} wide
-      art={<MausAvatar color="purple" gradient={BRAND_LILAC} size={64} state="excited" animated={!reduced} label={DEFAULT_BOT_NAME} />}
+      art={<MausAvatar color="purple" gradient={BRAND_LILAC} size={64} state="excited" animated={!reduced} label={productName()} />}
       footer={<>
         <button type="button" data-funnel-place="server" onClick={onServer} className={QUIET}>{t("funnel.place.server")}</button>
         {/* help improve: one quiet line on the quick first screen, never on a screen people wait on */}

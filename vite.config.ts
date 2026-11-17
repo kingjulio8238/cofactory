@@ -125,6 +125,8 @@ export default defineConfig({
     // DUSK_VITEST_E2E=host (CI's Windows and macOS shards) leaves the e2e files that run on Linux only.
     exclude: [...configDefaults.exclude, ...(hostE2eOnly() ? portableE2eFiles(root, include) : [])],
     setupFiles: ["server/testing/setup.ts", "src/testing/all-locales.ts", "src/testing/quiet-canceled-animations.ts"],
+    // dusk bot's own screens and names under test; the Cofactory ones switch it on where they are tested
+    env: { VITE_COFACTORY: "0" },
     // One file at a time by default: the suite spawns fake provider CLIs and real
     // harness servers, which a laptop feels. CI sets its runner's count (scripts/ci-scope.mjs).
     fileParallelism: workers > 1,
