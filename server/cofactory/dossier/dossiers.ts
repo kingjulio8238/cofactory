@@ -63,7 +63,7 @@ export function createDossiers(deps: DossierDeps) {
     if (!["selected", "shortlisted"].includes(niche.status)) return { ok: false, reason: `the niche is ${niche.status}; only a selected niche gets a dossier` };
     const version = (store.dossiersOf(nicheId).at(-1)?.version ?? 0) + 1;
     const id = randomUUID();
-    const verification = await verifyDossier(truth, body, policy, `dossier:${nicheId}`);
+    const verification = await verifyDossier(truth, body, policy, `dossier:${nicheId}`, niche.job);
     const qa = interrogate(`${nicheId}:${version}`, body, verification, policy);
     const taken = registry.nearest(niche, niche.factoryId, 50).find((claim) => claim.similarity >= block && claim.level === "live");
     const score = scoreDossier({ niche, body, verification, qa, policy, takenBy: taken ? taken.factoryId.slice(0, 8) : null });

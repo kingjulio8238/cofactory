@@ -113,6 +113,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       offerProblem: async (companyId) => {
         const offerUrl = rails.peek(companyId)?.offerUrl;
         if (!offerUrl) return "no offer page is published";
+        if (deps.mailDryRunFile) return existsSync(offerFile(companyId)) ? null : "no offer page is saved";
         const check = await evidence().checkContains({ url: offerUrl, needle: `/hooks/cofactory/form/${companyId}/`, subject: `offer:${companyId}` });
         return check.verdict === "verified" ? null : `${offerUrl} is ${check.verdict} (${check.reason})`;
       }, });

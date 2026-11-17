@@ -53,9 +53,11 @@ const VARIANTS: Variant[] = [
   { id: "vague-plan", edit: (body) => { body.firstTen.steps = "marketing"; body.failureModes = ["competition"]; }, pass: false },
   { id: "job-ads-as-pain", edit: (body) => { body.pains.forEach((pain) => { pain.sourceType = "job_board"; }); }, pass: false },
   { id: "wrong-spend-amount", edit: (body) => { body.spend[0]!.amountCents = 9_900; }, pass: false },
+  { id: "undeclared-tax-work", edit: (body) => { body.gap.why = `${body.gap.why} We also prepare and file each store's 1099s.`; }, pass: false },
+  { id: "tax-work-scoped-in-notes", edit: (body) => { body.gap.why = `${body.gap.why} We also prepare and file each store's 1099s.`; body.risks.notes = `${body.risks.notes} 1099s are produced from amounts the owner approves; classification questions go to their accountant.`; }, pass: true },
 ];
 
-/** The dossier verifier on a hand-labelled good dossier and eight ways of getting it wrong. A bad dossier that passes is the one error never allowed. */
+/** The dossier verifier on a hand-labelled good dossier and labelled variants of it. A bad dossier that passes is the one error never allowed. */
 export function dossierVerifierSuite(): Suite {
   return {
     name: "dossier-verifier",

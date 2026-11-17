@@ -529,8 +529,14 @@ The ten hard vetoes:
 - It passed on v3, after the scout narrowed the offer to "mechanical execution only" to clear a licensed-advice veto
   and found a fifth genuine practitioner page.
 
-**Known gap:** risk flags are declared by the scout itself. A model can clear a veto by re-scoping honestly or by
-under-declaring. A second-seat review or a rule check on the flags is a candidate for the next iteration.
+**Risk flags:** the scout declares its own flags, so a model could clear a veto by under-declaring. Now
+`undeclaredRisks` reads the dossier's own words (the job, the gap, the first-ten plan, what incumbents miss) for
+regulated topics: tax (1099, W-9, filings), legal, medical, financial advice, insurance and immigration. When a topic
+appears, the dossier fails unless it either raises a flag or explains, in the risk notes, why no licence or regulated
+claim is involved.
+- The `dossier-verifier` suite gained two cases: undeclared tax work fails, and the same work scoped in the notes passes.
+- All five live dossiers written so far give the same verdict under the rule. The consignment dossier v3 already scopes
+  its 1099 work in its notes.
 
 **Runtime fixes the live runs forced:**
 - Startup recovery now leaves alone sessions the same process started. A session started right after boot was being
@@ -604,6 +610,16 @@ buyers. It fails when the week runs out.
   3. Its outreach is refused because no mailbox is connected.
   4. A forged Stripe webhook is rejected; a signed one records the payment and passes the sprint.
   5. No decision is untraceable.
+
+**Rails preflight:** `pnpm cofactory:rails-check --company <id> [--data <dir>] [--dkim <selector>]` checks a
+company's rails without sending or creating anything:
+- the mailbox domain: a dedicated domain, not a personal provider, with MX, a single SPF record, DMARC, and DKIM when a
+  selector is given;
+- Stripe: a live key that can read payment links, and the webhook secret;
+- the public intake answers over HTTPS;
+- a postal address is on record.
+
+It exits non-zero until every check passes. On the shadow rails, 7 of 10 checks fail, as they should.
 
 **What the exit gate still needs (the owner's identity and legal gates):**
 - **A mailbox for the company.** A dedicated domain with SPF, DKIM and DMARC, connected in dusk.

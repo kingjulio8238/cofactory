@@ -37,7 +37,32 @@ export function countsIn(quote: string): number[] {
  * Checks a dossier against the world: every page must load and every quote must be on its page; the buyer count and
  * the human alternative's price must appear in their own quotes; and the dossier must meet its minimums.
  */
-export async function verifyDossier(truth: Truth, body: DossierBody, policy: DossierPolicy, subject: string): Promise<VerificationReport> {
+/** Work that often needs a licence or makes regulated claims, found in the dossier's own words about what it sells. */
+const REGULATED_TOPICS: ReadonlyArray<{ topic: string; pattern: RegExp }> = [
+  { topic: "tax", pattern: /\b(1099s?|w-?9s?|tax (returns?|filings?|filing|prep\w*|advice)|sales tax|payroll tax|occupancy tax|irs)\b/i },
+  { topic: "legal", pattern: /\b(legal advice|contract review|litigation|lawsuits?|evictions?|attorneys?)\b/i },
+  { topic: "medical", pattern: /\b(diagnos\w*|treatment plans?|prescri\w*|medical advice|clinical advice)\b/i },
+  { topic: "financial", pattern: /\b(investment advice|financial advice|securities|credit repair|loan approvals?)\b/i },
+  { topic: "insurance", pattern: /\b(insurance claims?|underwrit\w*)\b/i },
+  { topic: "immigration", pattern: /\b(immigration|visa petitions?)\b/i },
+];
+
+/**
+ * Risk flags the scout leaves off although its own description of the work names a regulated topic, unless the risk
+ * notes take that topic up and say why no licence or regulated claim is involved. The scout declares its own flags, so
+ * a flag it never raised has to be answered in words a later reader can check.
+ */
+export function undeclaredRisks(body: DossierBody, job: string): string[] {
+  if (body.risks.licensedAdvice || body.risks.regulatedClaims) return [];
+  const own = [job, body.gap.why, body.firstTen.steps, ...body.incumbents.map((incumbent) => incumbent.whatTheyMiss)].join("\n");
+  return REGULATED_TOPICS.flatMap(({ topic, pattern }) => {
+    const found = pattern.exec(own);
+    if (!found || pattern.test(body.risks.notes)) return [];
+    return [`the work touches ${topic} ("${found[0]}") but the risks neither flag it nor explain in the notes why no licence or regulated claim is involved`];
+  });
+}
+
+export async function verifyDossier(truth: Truth, body: DossierBody, policy: DossierPolicy, subject: string, job = ""): Promise<VerificationReport> {
   const claims: ClaimResult[] = [];
   const inputs = dossierClaims(body);
   for (let start = 0; start < inputs.length; start += 4) {
@@ -71,6 +96,7 @@ export async function verifyDossier(truth: Truth, body: DossierBody, policy: Dos
   if (body.failureModes.filter((mode) => mode.trim().length > 15).length < policy.minFailureModes) structural.push(`needs ${policy.minFailureModes} specific failure modes`);
   if (body.gap.why.trim().length < 60 || body.gap.hiddenReasonsRuledOut.trim().length < 40) structural.push("the gap and the hidden reasons it rules out must be specific");
   if (body.firstTen.steps.trim().length < 60) structural.push("the plan for the first ten customers must be concrete");
+  structural.push(...undeclaredRisks(body, job));
 
   const verifiedShare = claims.length ? claims.filter((claim) => claim.verdict === "verified").length / claims.length : 0;
   return { claims, verifiedShare, criticalFailures: critical, structural, pass: verifiedShare >= policy.verifiedShare && !critical.length && !structural.length };
