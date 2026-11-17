@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/cn";
 import { openExternalLink } from "@/lib/app-links";
+import { friendlyError } from "@/lib/plain-error";
 import { api } from "@/state/store";
 import { Card, ItemRow, NoteRow, PanelEmpty, PanelSections } from "./rows";
 
@@ -17,7 +18,11 @@ export interface SeatView {
     live: { objective: string; startedAt: number; rounds: number } | null;
     last: { status: string; endedAt: number | null; summary: string | null } | null;
   };
-  needsYou?: { inbox: Array<{ id: string; at: number; goal: string }>; alarms: Array<{ kind: string; detail: string }> };
+  needsYou?: {
+    approvals?: Array<{ id: string; kind: "launch" | "spend" | "close"; title: string; detail: string; at: number }>;
+    inbox: Array<{ id: string; at: number; goal: string }>;
+    alarms: Array<{ kind: string; detail: string }>;
+  };
   factory?: {
     territories: Array<{ title: string; code: string | null; niches: number }>;
     finds: Array<{ quote: string; site: string; url: string; at: number }>;
@@ -26,7 +31,7 @@ export interface SeatView {
     checklist: Array<{ id: Checklist; state: State }>;
   };
   company?: {
-    name: string; stage: string; status: string; capCents: number; availableCents: number; earnedCents: number; daysLeft: number | null; armed: boolean;
+    name: string; stage: string; status: string; capCents: number; availableCents: number; earnedCents: number; daysLeft: number | null; armed: boolean; live?: boolean;
     sprint: { buyers: number; contacts: number; urgent: number; committed: number } | null;
     firstDollar: { paid: boolean; delivered: boolean; rehearsed: boolean; reached: boolean };
   };
@@ -34,9 +39,14 @@ export interface SeatView {
 
 const REFRESH_MS = 10_000;
 
-/** The bot's Cofactory seat, read again every few seconds while shown; `undefined` until the first answer. */
+/** The bot's Cofactory seat, read again every few seconds while shown; `undefined` until the first answer. `refresh` reads it now. */
 export function useSeat(botId: string, enabled = true): SeatView | null | undefined {
+  return useSeatState(botId, enabled).view;
+}
+
+export function useSeatState(botId: string, enabled = true): { view: SeatView | null | undefined; refresh: () => void } {
   const [view, setView] = useState<SeatView | null | undefined>(undefined);
+  const [tick, setTick] = useState(0);
   useEffect(() => {
     if (!enabled) { setView(null); return; }
     let alive = true;
@@ -49,8 +59,8 @@ export function useSeat(botId: string, enabled = true): SeatView | null | undefi
     const timer = setInterval(read, REFRESH_MS);
     read();
     return () => { alive = false; clearInterval(timer); };
-  }, [botId, enabled]);
-  return view;
+  }, [botId, enabled, tick]);
+  return { view, refresh: () => setTick((count) => count + 1) };
 }
 
 const dollars = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
@@ -80,13 +90,45 @@ function Mark({ state }: { state: State }) {
   );
 }
 
-export function FactoryTab({ view }: { view: SeatView }) {
+/** One step held for the owner, with the two answers. */
+function ApprovalRow({ approval, onDecided }: { approval: NonNullable<NonNullable<SeatView["needsYou"]>["approvals"]>[number]; onDecided: () => void }) {
+  const [busy, setBusy] = useState<"approve" | "decline" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const answer = async (decision: "approve" | "decline") => {
+    setBusy(decision);
+    setError(null);
+    try {
+      await api(`/api/cofactory/approvals/${encodeURIComponent(approval.id)}`, { method: "POST", body: JSON.stringify({ decision }) });
+      onDecided();
+    } catch (cause) {
+      setError(friendlyError(cause, "That didn't go through. Try again."));
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <div data-approval={approval.kind} className="flex flex-col gap-2 px-3 py-2.5">
+      <span className="text-[14px] font-medium leading-5 text-ink">{approval.title}</span>
+      <span className="text-[13px] leading-[18px] text-ink-secondary">{approval.detail}</span>
+      {error && <span role="alert" className="text-[12px] leading-4 text-danger">{error}</span>}
+      <span className="flex gap-2">
+        <button type="button" data-approval-approve="" disabled={busy !== null} onClick={() => void answer("approve")}
+          className="ui-button ui-button-pill ui-button-primary min-h-8 px-4 text-[13px]">{busy === "approve" ? "Approving…" : "Approve"}</button>
+        <button type="button" data-approval-decline="" disabled={busy !== null} onClick={() => void answer("decline")}
+          className="ui-button ui-button-pill min-h-8 bg-ink/[0.06] px-4 text-[13px] hover:bg-ink/[0.1]">{busy === "decline" ? "Declining…" : "Decline"}</button>
+      </span>
+    </div>
+  );
+}
+
+export function FactoryTab({ view, onChanged }: { view: SeatView; onChanged?: () => void }) {
   const { work, needsYou, factory, company } = view;
-  const waiting = (needsYou?.inbox.length ?? 0) + (needsYou?.alarms.length ?? 0);
+  const waiting = (needsYou?.approvals?.length ?? 0) + (needsYou?.inbox.length ?? 0) + (needsYou?.alarms.length ?? 0);
   return (
     <PanelSections data-panel-tabpanel="factory">
       {waiting > 0 && (
         <Card label="Needs you">
+          {needsYou!.approvals?.map((approval) => <ApprovalRow key={approval.id} approval={approval} onDecided={() => onChanged?.()} />)}
           {needsYou!.inbox.map((message) => <ItemRow key={message.id} title={message.goal} hint={ago(message.at)} />)}
           {needsYou!.alarms.map((alarm) => <NoteRow key={alarm.kind} tone="warn">{alarm.detail.charAt(0).toUpperCase() + alarm.detail.slice(1)}</NoteRow>)}
         </Card>
@@ -137,7 +179,9 @@ export function FactoryTab({ view }: { view: SeatView }) {
           <ItemRow title="Stage" value={company.stage[0]!.toUpperCase() + company.stage.slice(1)} />
           <ItemRow title="Money left" value={`${dollars(company.availableCents)} of ${dollars(company.capCents)}`} />
           <ItemRow title="Earned" value={dollars(company.earnedCents)} />
-          {company.daysLeft !== null && <ItemRow title="Days to a paying customer" value={String(company.daysLeft)} hint="Closed after that, with what it learned kept" />}
+          {company.daysLeft !== null && (company.live
+            ? <ItemRow title="Days to a paying customer" value={String(company.daysLeft)} hint="Counted from going live; closed after that, with what it learned kept" />
+            : <ItemRow title="Days left to go live" value={String(company.daysLeft)} hint="Its five days to a paying customer start when you arm outreach" />)}
         </Card>
         <Card label="Validation">
           {company.sprint

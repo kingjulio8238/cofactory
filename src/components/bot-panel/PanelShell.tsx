@@ -9,7 +9,7 @@ import { Icon } from "../Icon";
 import { useCaptionChrome } from "../DesktopCapabilities";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import { ComputerTab } from "./ComputerTab";
-import { FactoryTab, useSeat } from "./FactoryTab";
+import { FactoryTab, useSeatState } from "./FactoryTab";
 import { cofactoryEnabled } from "@/lib/feature-flags";
 import { panelTabs, screenViewAllowed } from "@/lib/store-app";
 import { PAGES, resolveTarget, TAB_LABEL, type PanelTab, type PanelTarget, type SimplePageId } from "./page-registry";
@@ -39,7 +39,7 @@ export function BotPanel({ bot, derived, linkedSection, computerRequest = 0, onC
 }) {
   const { dragProps } = useCaptionChrome();
   const link = usePanelLink();
-  const seat = useSeat(bot.id, cofactoryEnabled());
+  const { view: seat, refresh: refreshSeat } = useSeatState(bot.id, cofactoryEnabled());
   const seated = Boolean(seat);
   const [tab, setTab] = useState<PanelTab>(() => { const first = initialTarget(linkedSection, link).tab; return panelTabs({ factory: true }).includes(first) ? first : "details"; });
   // a seated bot opens on its Factory tab once its seat is known, unless a tab was asked for or picked
@@ -176,7 +176,7 @@ export function BotPanel({ bot, derived, linkedSection, computerRequest = 0, onC
         initial={reduced || !tabSwapped ? false : SWAP.initial}
         animate={SWAP.animate}
       >
-        {tab === "factory" && seat && <FactoryTab view={seat} />}
+        {tab === "factory" && seat && <FactoryTab view={seat} onChanged={refreshSeat} />}
         {tab === "details" && <PanelDetailsTab bot={bot} derived={derived} onOpen={openPage} />}
         {tab === "computer" && screenViewAllowed() && <ComputerTab bot={bot} derived={derived} onOpen={openPage} />}
         {tab === "advanced" && <PanelAdvancedTab bot={bot} derived={derived} onOpen={openPage} />}

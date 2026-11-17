@@ -163,6 +163,9 @@ const localUi = process.env.DUSK_REMOTE_UI === "server" ? null : createLocalUi({
 });
 let devServer = null;
 const APP_ICON = path.join(__dirname, "resources/app-icon.png");
+// Security: dusk.bot's signed releases are dusk bot, so a Cofactory build must never fetch or install them. Updates stay
+// off until Cofactory publishes its own releases under its own key.
+const OWN_RELEASE_CHANNEL = false;
 let desktopViewerWindow = null;
 let desktopViewerOwner = null;
 let desktopViewerContextId = null;
@@ -3487,7 +3490,7 @@ app.whenReady().then(async () => {
     activeRemoteMicrophone: () => activeEnvironment(environmentsState)?.microphone === true,
     askRemoteMicrophone,
     homeOrigin: () => homeWindow.placeOrigin(),
-  }); startDesktopErrorReporting({ app, prefs: desktopPrefs }); if (!app.isPackaged) startDemoUpdates(); else startAppUpdates(createUpdateNotice({ request: localServerRequest, open: url => void shell.openExternal(url), memory: jsonFile(path.join(app.getPath("userData"), "update-notice.json")), log: slog, notify: ({ title, body, click }) => { if (!Notification.isSupported()) return; const note = new Notification({ title, body }); note.on("click", click); note.show(); } }));
+  }); startDesktopErrorReporting({ app, prefs: desktopPrefs }); if (!app.isPackaged) startDemoUpdates(); else if (OWN_RELEASE_CHANNEL) startAppUpdates(createUpdateNotice({ request: localServerRequest, open: url => void shell.openExternal(url), memory: jsonFile(path.join(app.getPath("userData"), "update-notice.json")), log: slog, notify: ({ title, body, click }) => { if (!Notification.isSupported()) return; const note = new Notification({ title, body }); note.on("click", click); note.show(); } }));
   session.defaultSession.setPermissionRequestHandler(appPermissions.request);
   session.defaultSession.setPermissionCheckHandler(appPermissions.check);
   // Before the window, so the harness has the CUA descriptor on first render.

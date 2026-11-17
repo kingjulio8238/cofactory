@@ -6,6 +6,7 @@ import type { FactorySettings } from "./settings.ts";
 import type { Orders } from "./validation/orders.ts";
 import type { Rails } from "./validation/rails.ts";
 import type { Sprints } from "./validation/sprints.ts";
+import type { Approvals } from "./approvals.ts";
 
 const DAY_MS = 24 * 60 * 60_000;
 
@@ -21,6 +22,7 @@ export function seatView(deps: {
   orders: Orders;
   rails: Rails;
   settings: FactorySettings;
+  approvals: Approvals | null;
   now: number;
 }) {
   const { book, runtime, discovery, sprints, orders, rails, settings, now } = deps;
@@ -33,6 +35,7 @@ export function seatView(deps: {
     last: last ? { status: last.status, endedAt: last.endedAt, summary: last.endRequested?.summary ?? last.stopReason, threadId: last.threadId } : null,
   };
   const needsYou = {
+    approvals: (deps.approvals?.pending(seat.companyId === null ? undefined : seat.companyId) ?? []).map((approval) => ({ id: approval.id, kind: approval.kind, title: approval.title, detail: approval.detail, at: approval.at })),
     inbox: book.inbox("owner", seat.companyId, 5).map((message) => ({ id: message.id, at: message.at, type: message.type, goal: message.brief.goal })),
     alarms: (runtime?.openAlarms(seat.companyId ?? undefined) ?? []).map((alarm) => ({ kind: alarm.kind, detail: alarm.detail, raisedAt: alarm.raisedAt })),
   };
@@ -69,6 +72,8 @@ export function seatView(deps: {
 
   const company = book.company(seat.companyId);
   if (!company) return { seat, work, needsYou };
+  // the clock counts from going live; before that, the longer limit to go live at all
+  const daysLeft = (armedAt: number | null) => Math.max(0, Math.ceil(((armedAt ?? company.createdAt) + (armedAt ? settings.closeAfterDays : settings.goLiveDays) * DAY_MS - now) / DAY_MS));
   const sprint = sprints.running(company.id);
   const evidence = sprint ? sprints.evidence(sprint.id) : null;
   const earned = book.entries({ companyId: company.id }).filter((entry) => entry.kind === "revenue").reduce((sum, entry) => sum + entry.cents, 0);
@@ -77,7 +82,8 @@ export function seatView(deps: {
     company: {
       id: company.id, name: company.name, stage: company.stage, status: company.status, capCents: company.capCents,
       availableCents: book.available(company.id), earnedCents: earned,
-      daysLeft: company.status === "live" && earned === 0 ? Math.max(0, Math.ceil((company.createdAt + settings.closeAfterDays * DAY_MS - now) / DAY_MS)) : null,
+      daysLeft: company.status === "live" && earned === 0 ? daysLeft(rails.peek(company.id)?.armedAt ?? null) : null,
+      live: rails.peek(company.id)?.armedAt != null,
       sprint: sprint ? { buyers: sprints.targets(sprint.id).length, contacts: sprints.touches(sprint.id).length, urgent: evidence?.urgent.length ?? 0, committed: evidence?.committed.length ?? 0 } : null,
       firstDollar: orders.firstDollar(company.id),
       armed: rails.peek(company.id)?.outreachArmed === true,

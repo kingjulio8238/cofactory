@@ -31,6 +31,8 @@ import { openSprints, type Sprints } from "./validation/sprints.ts";
 import { openOrders, type Orders } from "./validation/orders.ts";
 import { createRehearsals } from "./validation/rehearsal.ts";
 import { closeIdleCompanies, openSettings } from "./settings.ts";
+import { openApprovals, type Approval, type Approvals } from "./approvals.ts";
+import type { KillReason, SpendCategory } from "../../shared/cofactory/types.ts";
 import { armsLength } from "./truth/classify.ts";
 import { writeFileAtomic } from "../atomic.ts";
 
@@ -57,6 +59,8 @@ export interface CofactoryHostDeps {
   /** How seats' turns run in dusk; without it the runtime does not start. */
   turns?: Omit<TurnPort, "threadFor"> & { createThread(botId: string, title: string): string | null };
   createBot?: LauncherDeps["createBot"];
+  /** Called once a factory is open with its lead's bot: the lead becomes the chief of staff in place of dusk's helper. */
+  factoryOpened?: (leadBotId: string) => void;
   policy?: Partial<RuntimePolicy>;
   /** When set, outreach is written to this file instead of being sent, so a live run reaches no one. */
   mailDryRunFile?: string;
@@ -140,6 +144,52 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
   });
 
   const settings = openSettings(join(deps.dataDir, "cofactory-settings.json"));
+  let approvalStore: Approvals | null = null;
+  const approvals = (): Approvals => (approvalStore ??= openApprovals(join(deps.dataDir, "cofactory-approvals.db")));
+
+  /**
+   * Carries out the owner's decision on a held step: approved, the launch, hold or close runs as the owner; either way
+   * the seat that asked gets a message saying what happened.
+   */
+  async function settleApproval(id: string, approve: boolean, note: string | null): Promise<{ ok: true; approval: Approval; outcome: string } | { ok: false; reason: string }> {
+    const approval = approvals().approval(id);
+    if (!approval || approval.status !== "pending") return { ok: false, reason: "no pending approval with that id" };
+    const book = books();
+    let outcome = note ? `declined: ${note}` : "declined";
+    if (approve) {
+      const payload = approval.payload;
+      if (approval.kind === "launch") {
+        const launcher = runtimeParts()?.launcher;
+        if (!launcher) return { ok: false, reason: "the runtime is not running" };
+        const launched = await launcher.launch(payload as { name: string; brief: string; capCents: number; dossierId?: string }, "owner");
+        if (!launched.ok) return { ok: false, reason: launched.reason };
+        observe().decide({ companyId: launched.company.id, session: null, actor: "owner", kind: "company.launch", verdict: "allowed", reason: `approved: ${approval.title}`, evidence: [{ type: "company", id: launched.company.id }] });
+        outcome = `approved: ${launched.company.name} is launched (company ${launched.company.id})`;
+      } else if (approval.kind === "spend") {
+        const spend = payload as { companyId: string; category: SpendCategory; vendor: string; cents: number };
+        const held = book.authorize({ companyId: spend.companyId, category: spend.category, vendor: spend.vendor, cents: spend.cents }, "owner");
+        if (!held.ok) return { ok: false, reason: held.reason };
+        observe().decide({ companyId: spend.companyId, session: null, actor: "owner", kind: "spend.authorize", verdict: "allowed", reason: `approved: ${approval.title}`, evidence: [{ type: "hold", id: held.authorization.id }] });
+        outcome = `approved: hold ${held.authorization.id} for ${spend.cents} cents at ${spend.vendor}; capture it with the receipt once charged`;
+      } else {
+        const close = payload as { companyId: string; reason: KillReason; why: string };
+        const killed = book.kill(close.companyId, close.reason, "owner", close.why);
+        if (!killed.ok) return { ok: false, reason: killed.reason };
+        await runtimeParts()?.sessions.stopCompany(close.companyId, `closed by the owner: ${close.why}`);
+        observe().decide({ companyId: close.companyId, session: null, actor: "owner", kind: "company.kill", verdict: "allowed", reason: `approved: ${close.why}; ${killed.releasedCents} cents returned`, evidence: [{ type: "company", id: close.companyId }] });
+        outcome = `approved: closed, ${killed.releasedCents} cents back to the factory; write its post-mortem`;
+      }
+    }
+    const settled = approvals().decide(id, approve ? "approved" : "declined", note)!;
+    if (approval.kind === "close") runtimeParts()?.store.resolve(approval.companyId, "close_due");
+    const toCompanyCeo = approval.kind === "spend" && approval.companyId !== null && book.company(approval.companyId)?.status === "live";
+    book.send({
+      type: "report", fromBotId: "owner", fromRole: "owner", toRole: toCompanyCeo ? "ceo" : "lead", companyId: toCompanyCeo ? approval.companyId : null,
+      parentId: null, budgetAuthId: null, replyPolicy: "one_way",
+      brief: { goal: `The owner ${approve ? "approved" : "declined"}: ${approval.title}`, known: outcome, doneWhen: "you carry on with it in mind", constraints: "" },
+    });
+    return { ok: true, approval: settled, outcome };
+  }
   const relatedFile = join(deps.dataDir, "cofactory-related.json");
   /** The owner's own addresses and domains, and those of anyone related: payments from them never count as customers. */
   const relatedParties = (): { emails: string[]; domains: string[] } => {
@@ -221,7 +271,15 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       start: turns.start,
       interrupt: turns.interrupt,
     };
-    const sessions = createSessions({ store, book: books(), workspaces, turns: port, policy, log });
+    const sessions = createSessions({ store, book: books(), workspaces, turns: port, policy, log, holdNew: () => {
+      const ceiling = settings.get().dailyModelCents;
+      if (!(ceiling > 0)) return null;
+      const day = new Date(); day.setHours(0, 0, 0, 0);
+      const used = books().entries({}).filter((entry) => entry.kind === "shadow" && entry.at >= day.getTime()).reduce((sum, entry) => sum + entry.cents, 0);
+      if (used < ceiling) { store.resolve(null, "daily_ceiling"); return null; }
+      store.raise(null, "daily_ceiling", `today's model use reached the owner's ceiling of $${(ceiling / 100).toFixed(2)}; new sessions start again tomorrow`);
+      return "the factory reached today's ceiling on model use";
+    } });
     const scheduler = createScheduler({ book: books(), truth: evidence(), store, sessions, discovery: discoveryService(), dossiers: dossierService() });
     const launcher = deps.createBot ? createLauncher({ book: books(), workspaces, createBot: deps.createBot, discovery: { store: discoveryService().store, registry: registryOf() } }) : undefined;
     runtime = { store, sessions, scheduler, launcher, policy };
@@ -239,7 +297,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       for (const alarm of checkAlarms({ book: books(), truth: evidence(), store: parts.store, policy: parts.policy })) log(`cofactory: alarm ${alarm.kind}: ${alarm.detail}`);
       await sprintUpkeep(parts.store);
       bookRevenue();
-      closeIdleCompanies({ book: books(), settings: settings.get(), store: parts.store, observe: observe(), log });
+      closeIdleCompanies({ book: books(), settings: settings.get(), store: parts.store, observe: observe(), approvals: approvals(), armedAt: (companyId) => validationParts().rails.peek(companyId)?.armedAt ?? null, log });
       for (const company of books().companies().filter((candidate) => candidate.status === "live")) {
         const missing = validationParts().rails.missing(company.id);
         const detail = `the owner has not connected ${missing.join(", ")}; work that needs them waits, everything else goes ahead`;
@@ -274,6 +332,9 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     validation: validationParts,
     intakeDoor,
     settings,
+    approvals,
+    settleApproval,
+    factoryOpened: (leadBotId: string) => deps.factoryOpened?.(leadBotId),
     relatedParties,
     setRelatedParties(value: { emails: string[]; domains: string[] }): void {
       writeFileAtomic(relatedFile, JSON.stringify(value), { mode: 0o600 });
@@ -335,7 +396,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       const params = (request.params && typeof request.params === "object" ? request.params : {}) as { name?: unknown; arguments?: unknown };
       const parts = runtimeParts();
       const result = await runTool({
-        book: books(), truth: evidence(), seat, actor: `${seat.role}:${ctx.botName}`, observe: observe(), discovery: discoveryService(), dossiers: dossierService(), validation: validationParts(), settings: settings.get,
+        book: books(), truth: evidence(), seat, actor: `${seat.role}:${ctx.botName}`, observe: observe(), discovery: discoveryService(), dossiers: dossierService(), validation: validationParts(), settings: settings.get, approvals: approvals(),
         session: parts?.store.liveFor(seat.botId) ?? null,
         ...(parts ? { sessions: parts.sessions } : {}), ...(parts?.launcher ? { launcher: parts.launcher } : {}),
       }, params.name, params.arguments);
@@ -365,6 +426,8 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       dossiers = null;
       validation?.sprints.close();
       validation?.orders.close();
+      approvalStore?.close();
+      approvalStore = null;
       validation = null;
       registryClose = null;
       book?.close();

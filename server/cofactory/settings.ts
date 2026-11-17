@@ -4,6 +4,7 @@ import { writeFileAtomic } from "../atomic.ts";
 import type { Book } from "./book.ts";
 import type { Observer } from "./observe/observer.ts";
 import type { RuntimeStore } from "./runtime/store.ts";
+import type { Approvals } from "./approvals.ts";
 
 /** The owner's standing choices for the factory, set in the first run and changed in Settings. */
 export interface FactorySettings {
@@ -20,11 +21,15 @@ export interface FactorySettings {
    * most a tenth of the month's money, and only a company that has made money gets more.
    */
   allocation: "fixed" | "dynamic";
-  /** A company with no paying customer this many days after launch is closed (or put to the owner, per approvals.kill). */
+  /** A company with no paying customer this many days after its outreach was armed is closed (or put to the owner). */
   closeAfterDays: number;
+  /** A company that never went live (outreach armed) this many days after launch is closed the same way. */
+  goLiveDays: number;
+  /** The most model use, at API prices, the factory may start new sessions on in one day (it runs on the owner's plan). */
+  dailyModelCents: number;
   approvals: {
     launch: "ask" | "auto";
-    /** Spends above this ask the owner first; 0 asks for every one. */
+    /** Spends above this ask the owner first; 0 never asks. */
     spendOverCents: number;
     kill: "ask" | "tell";
   };
@@ -38,7 +43,7 @@ export interface FactorySettings {
 }
 
 export const DEFAULT_SETTINGS: FactorySettings = {
-  country: null, region: null, budgetCents: 0, companyCapCents: 0, allocation: "dynamic", closeAfterDays: 5,
+  country: null, region: null, budgetCents: 0, companyCapCents: 0, allocation: "dynamic", closeAfterDays: 5, goLiveDays: 14, dailyModelCents: 2_500,
   approvals: { launch: "ask", spendOverCents: 2_500, kill: "tell" },
   hunches: [], never: [], seed: null,
   onboardedAt: null,
@@ -89,17 +94,25 @@ const DAY_MS = 24 * 60 * 60_000;
  * The owner's close rule: a live company with no paying customer `closeAfterDays` after launch is closed, its money
  * returned and a post-mortem asked for; or, when the owner approves closes, it is put to them once in their inbox.
  */
-export function closeIdleCompanies(deps: { book: Book; settings: FactorySettings; store: RuntimeStore; observe: Observer; now?: () => number; log?: (line: string) => void }): void {
+export function closeIdleCompanies(deps: {
+  book: Book; settings: FactorySettings; store: RuntimeStore; observe: Observer; approvals: Approvals;
+  /** When the owner armed the company's outreach, or null while it has not gone live. */
+  armedAt: (companyId: string) => number | null;
+  now?: () => number; log?: (line: string) => void;
+}): void {
   const { book, settings: rules, store } = deps;
   const now = (deps.now ?? Date.now)();
   for (const company of book.companies().filter((candidate) => candidate.status === "live")) {
-    if (now - company.createdAt < rules.closeAfterDays * DAY_MS) continue;
     if (book.entries({ companyId: company.id }).some((entry) => entry.kind === "revenue")) continue;
-    const why = `no paying customer ${rules.closeAfterDays} days after launch`;
+    const armed = deps.armedAt(company.id);
+    const why = armed === null
+      ? (now - company.createdAt >= rules.goLiveDays * DAY_MS ? `not live ${rules.goLiveDays} days after launch` : null)
+      : (now - armed >= rules.closeAfterDays * DAY_MS ? `no paying customer ${rules.closeAfterDays} days after going live` : null);
+    if (!why) continue;
     if (rules.approvals.kill === "ask") {
       if (store.raise(company.id, "close_due", `${why}; waiting for the owner's OK to close it`)) {
-        book.send({ type: "kill", fromBotId: "runtime", fromRole: "lead", toRole: "owner", companyId: company.id, parentId: null, budgetAuthId: null, replyPolicy: "report_only",
-          brief: { goal: `Close ${company.name}?`, known: `${company.name} has had ${why}.`, doneWhen: "the owner closes it or tops it up", constraints: "Closing returns its remaining money to the factory." } });
+        deps.approvals.request({ kind: "close", companyId: company.id, title: `Close ${company.name}?`, detail: `${company.name} has had ${why}. Closing returns its money to the factory.`,
+          payload: { companyId: company.id, reason: "metric", why }, requestedBy: "rule" });
       }
       continue;
     }

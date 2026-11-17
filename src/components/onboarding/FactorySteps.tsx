@@ -10,6 +10,7 @@ import { MausAvatar } from "../Avatar";
 import { Toggle } from "../ui/Toggle";
 import { PRIMARY, QUIET, SECONDARY, StepFrame, TILE } from "./FunnelSteps";
 import { CrewArt } from "./CrewArt";
+import { Select } from "../Select";
 
 const MIN_STAKE_CENTS = 2_500;
 const dollars = (cents: number) => `$${Math.round(cents / 100).toLocaleString("en-US")}`;
@@ -89,10 +90,10 @@ export function WhereStep({ country, region, onNext }: { country: string | null;
         <button type="button" data-primary="" data-where-next="" disabled={!where || busy} onClick={() => void save()} className={PRIMARY}>Continue</button>
       </>}>
       <div className="flex w-full max-w-[440px] flex-col gap-3 text-start">
-        <select data-where-country="" aria-label="Country" value={where} onChange={(event) => setWhere(event.target.value)} className={FIELD}>
+        <Select data-where-country="" aria-label="Country" value={where} onChange={(event) => setWhere(event.target.value)} variant="quiet" size="lg" className="w-full">
           <option value="">Choose a country</option>
           {COUNTRIES.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
-        </select>
+        </Select>
         {(where === "US" || where === "CA" || where === "AU") && (
           <input aria-label={where === "CA" ? "Province" : "State"} value={state} onChange={(event) => setState(event.target.value)}
             placeholder={where === "CA" ? "Province" : "State"} className={FIELD} />

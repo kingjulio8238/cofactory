@@ -124,7 +124,7 @@ export interface FactoryMessage {
   at: number;
   type: MessageType;
   fromBotId: string;
-  fromRole: Role;
+  fromRole: Role | "owner";
   toRole: Role | "owner";
   companyId: string | null;
   parentId: string | null;

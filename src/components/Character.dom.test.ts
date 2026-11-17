@@ -6,11 +6,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => { document.body.innerHTML = ""; vi.unstubAllEnvs(); vi.resetModules(); });
 
-async function render(element: () => Promise<Parameters<typeof createElement>[0]>, props: Record<string, unknown>) {
+async function render(element: () => Promise<unknown>, props: Record<string, unknown>) {
   const host = document.createElement("div");
   document.body.append(host);
   const type = await element();
-  flushSync(() => createRoot(host).render(createElement(type, props)));
+  flushSync(() => createRoot(host).render(createElement(type as Parameters<typeof createElement>[0], props)));
   return host;
 }
 

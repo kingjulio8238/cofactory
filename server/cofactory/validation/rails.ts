@@ -19,6 +19,8 @@ export interface CompanyRails {
   postalAddress: string | null;
   /** The owner's go-ahead for this company to contact real people; nothing is sent while it is off. */
   outreachArmed: boolean;
+  /** When outreach was last armed; the company's days to a paying customer count from here. */
+  armedAt?: number | null;
 }
 
 type RailsFile = Record<string, CompanyRails>;
@@ -47,7 +49,9 @@ export function openRails(file: string) {
     },
     set(companyId: string, patch: Partial<Omit<CompanyRails, "formToken">>): CompanyRails {
       const data = read();
-      data[companyId] = { ...(data[companyId] ?? blank()), ...patch };
+      const before = data[companyId] ?? blank();
+      const armedAt = patch.outreachArmed === true && !before.outreachArmed ? Date.now() : patch.outreachArmed === false ? null : before.armedAt ?? null;
+      data[companyId] = { ...before, ...patch, armedAt };
       write(data);
       return data[companyId]!;
     },

@@ -20,7 +20,7 @@ describe("the Factory tab", () => {
     const host = mount({
       seat: { role: "scout", companyId: null },
       work: { live: { objective: "Search this factory's industries for niches", startedAt: Date.now() - 5 * 60_000, rounds: 2 }, last: null },
-      needsYou: { inbox: [{ id: "m1", at: Date.now(), goal: "Close Idle Co?" }], alarms: [] },
+      needsYou: { approvals: [{ id: "a1", kind: "launch", title: "Start Consign Payouts?", detail: "$50 to start, from a shortlisted dossier.", at: Date.now() }], inbox: [{ id: "m1", at: Date.now(), goal: "Close Idle Co?" }], alarms: [] },
       factory: {
         territories: [{ title: "Roofing Contractors", code: "238160", niches: 2 }, { title: "Marinas", code: "713930", niches: 0 }],
         finds: [{ quote: "we still reconcile remits by hand", site: "forum.roofers.test", url: "https://forum.roofers.test/t/1", at: Date.now() - 120_000 }],
@@ -32,6 +32,7 @@ describe("the Factory tab", () => {
     const text = host.textContent ?? "";
     expect(text.indexOf("Needs you"), "what waits on the owner comes first").toBeLessThan(text.indexOf("Now"));
     expect(text).toContain("Close Idle Co?");
+    expect(host.querySelector("[data-approval=launch]")?.textContent).toContain("Start Consign Payouts?$50 to start, from a shortlisted dossier.ApproveDecline");
     expect(text).toContain("Search this factory's industries for niches");
     expect(text).toContain("Searching · 2 of 3 niches");
     expect(text).toContain("Roofing Contractors2 niches");
@@ -46,7 +47,7 @@ describe("the Factory tab", () => {
       work: { live: null, last: { status: "waiting", endedAt: Date.now() - 3_600_000, summary: "Offer page published" } },
       needsYou: { inbox: [], alarms: [{ kind: "rails_missing", detail: "the owner has not connected a Stripe key" }] },
       company: {
-        name: "Consign Payouts", stage: "build", status: "live", capCents: 5_000, availableCents: 4_200, earnedCents: 0, daysLeft: 3, armed: false,
+        name: "Consign Payouts", stage: "build", status: "live", capCents: 5_000, availableCents: 4_200, earnedCents: 0, daysLeft: 9, armed: false, live: false,
         sprint: { buyers: 4, contacts: 0, urgent: 0, committed: 0 },
         firstDollar: { paid: false, delivered: false, rehearsed: false, reached: false },
       },
@@ -55,7 +56,7 @@ describe("the Factory tab", () => {
     expect(text).toContain("The owner has not connected a Stripe key");
     expect(text).toContain("Offer page published");
     expect(text).toContain("Money left$42 of $50");
-    expect(text).toContain("Days to a paying customerClosed after that, with what it learned kept3");
+    expect(text, "before going live, the days are to go live").toContain("Days left to go liveIts five days to a paying customer start when you arm outreach9");
     expect(text).toContain("ContactedWaiting for your OK");
     expect(text).toContain("A stand-in did it again from the runbook");
   });

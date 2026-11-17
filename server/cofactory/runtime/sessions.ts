@@ -38,6 +38,8 @@ export interface SessionDeps {
   log?: (line: string) => void;
   /** Runs `work` after `ms`; tests pass one that runs it at once. */
   defer?: (work: () => void, ms: number) => void;
+  /** Why no new session may start now (the owner's daily ceiling on model use), or null. Running sessions finish. */
+  holdNew?: () => string | null;
 }
 
 /**
@@ -186,6 +188,8 @@ export function createSessions(deps: SessionDeps) {
       }
       const live = store.liveFor(input.botId);
       if (live) return { session: live, started: false };
+      const held = deps.holdNew?.();
+      if (held) return { refused: held };
       const company = input.companyId ? book.company(input.companyId) : null;
       await workspaces.ensure(input.companyId, company ? `# ${company.name}\n\n${company.brief}\n` : "# Factory\n");
       const threadId = turns.threadFor(input.botId, input.companyId, `Cofactory · ${company?.name ?? "factory"}`);

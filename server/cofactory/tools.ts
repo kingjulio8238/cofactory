@@ -18,6 +18,9 @@ import { join } from "node:path";
 import { verifyEvidence } from "./truth/gate.ts";
 import { POSTMORTEM_CAUSES } from "./discovery/store.ts";
 import { startingStakeLimit, topUpProblem, type FactorySettings } from "./settings.ts";
+import type { Approvals } from "./approvals.ts";
+
+const dollarsOf = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 import type { Truth } from "./truth/store.ts";
 import type { Launcher } from "./runtime/launcher.ts";
 import type { Sessions } from "./runtime/sessions.ts";
@@ -86,8 +89,10 @@ export interface ToolContext {
   discovery?: Discovery;
   dossiers?: Dossiers;
   validation?: { sprints: Sprints; outreach: Outreach; rails: Rails; orders: Orders; folderOf(companyId: string): string; saveOffer(companyId: string, html: string): string };
-  /** The owner's standing choices: the per-company cap a launch may not exceed. */
+  /** The owner's standing choices: the per-company cap a launch may not exceed, and what waits for their OK. */
   settings?: () => FactorySettings;
+  /** Where a step the owner asked to approve waits for them. */
+  approvals?: Approvals;
   /** The seat's running session, which decisions and tool calls are filed under. */
   session?: Session | null;
 }
@@ -156,6 +161,13 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     input: z.object({ category: z.enum(SPEND_CATEGORIES), vendor: z.string().min(1).max(200), cents, purpose: z.string().min(1).max(500) }),
     run(args, ctx) {
       const { book, seat, actor } = ctx;
+      const askOver = ctx.settings?.().approvals.spendOverCents ?? 0;
+      if (ctx.approvals && askOver > 0 && args.cents > askOver) {
+        const approval = ctx.approvals.request({ kind: "spend", companyId: seat.companyId!, title: `Spend ${dollarsOf(args.cents)} at ${args.vendor}?`,
+          detail: `${args.category}: ${args.purpose}`, payload: { companyId: seat.companyId!, category: args.category, vendor: args.vendor, cents: args.cents, purpose: args.purpose }, requestedBy: actor });
+        decide(ctx, "spend.authorize", "refused", `${args.cents} cents at ${args.vendor}: waiting for the owner's OK (approval ${approval.id.slice(0, 8)})`, []);
+        return ok({ waitingForOwner: approval.id, note: "Spends this large wait for the owner. You'll get the hold in a message if they approve." });
+      }
       const result = book.authorize({ companyId: seat.companyId!, category: args.category, vendor: args.vendor, cents: args.cents }, actor);
       if (!result.ok) { decide(ctx, "spend.authorize", "refused", `${args.cents} cents ${args.category} at ${args.vendor}: ${result.reason}`, []); return refused(result.reason); }
       decide(ctx, "spend.authorize", "allowed", `${args.cents} cents ${args.category} at ${args.vendor} for ${args.purpose}`, [{ type: "hold", id: result.authorization.id }]);
@@ -667,6 +679,13 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
       }
       const input = { name: args.name, brief: args.brief, capCents: args.cap_cents, ...(args.dossier_id ? { dossierId: args.dossier_id } : {}) };
       if (input.dossierId && !launcher) return refused("launching from a dossier needs the runtime");
+      if (ctx.approvals && ctx.settings?.().approvals.launch === "ask") {
+        const approval = ctx.approvals.request({ kind: "launch", companyId: null, title: `Start ${args.name}?`,
+          detail: `${dollarsOf(args.cap_cents)} to start${args.dossier_id ? ", from a shortlisted dossier" : ""}. ${args.brief.trim().slice(0, 300)}`.trim(),
+          payload: input, requestedBy: actor });
+        decide(ctx, "company.launch", "refused", `${args.name}: waiting for the owner's OK (approval ${approval.id.slice(0, 8)})`, [], null);
+        return ok({ waitingForOwner: approval.id, note: "The owner approves launches. You'll get a message when they decide; do other work meanwhile." });
+      }
       const result = launcher ? await launcher.launch(input, actor) : book.launch(input, actor);
       if (!result.ok) { decide(ctx, "company.launch", "refused", `${args.name} with ${args.cap_cents} cents: ${result.reason}`, [], null); return refused(result.reason); }
       decide(ctx, "company.launch", "allowed", `${args.name} with a ${args.cap_cents}-cent cap`, [{ type: "company", id: result.company.id }], result.company.id);
@@ -697,6 +716,13 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     input: z.object({ company_id: z.string().min(1), reason: z.enum(KILL_REASONS), why: z.string().min(1).max(2_000) }),
     async run(args, ctx) {
       const { book, actor, sessions } = ctx;
+      if (ctx.approvals && ctx.settings?.().approvals.kill === "ask") {
+        const company = book.company(args.company_id);
+        if (!company) return refused("no such company");
+        const approval = ctx.approvals.request({ kind: "close", companyId: company.id, title: `Close ${company.name}?`, detail: args.why, payload: { companyId: company.id, reason: args.reason, why: args.why }, requestedBy: actor });
+        decide(ctx, "company.kill", "refused", `waiting for the owner's OK (approval ${approval.id.slice(0, 8)})`, [{ type: "company", id: company.id }], company.id);
+        return ok({ waitingForOwner: approval.id, note: "The owner approves closing a company. You'll get a message when they decide." });
+      }
       const result = book.kill(args.company_id, args.reason, actor, args.why);
       decide(ctx, "company.kill", result.ok ? "allowed" : "refused", result.ok ? `${args.reason}: ${args.why}` : result.reason, [{ type: "company", id: args.company_id }], args.company_id);
       if (result.ok) await sessions?.stopCompany(args.company_id, `killed: ${args.why}`);

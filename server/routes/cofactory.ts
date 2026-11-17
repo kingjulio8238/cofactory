@@ -23,6 +23,7 @@ import type { Sprints } from "../cofactory/validation/sprints.ts";
 import type { Orders } from "../cofactory/validation/orders.ts";
 import type { Settings } from "../cofactory/settings.ts";
 import { seatView } from "../cofactory/seat-view.ts";
+import type { Approval, Approvals } from "../cofactory/approvals.ts";
 import { drawTerritories, territoryCode, territoryText } from "../cofactory/discovery/territories.ts";
 import { PROFILE_FIELDS } from "../../shared/cofactory/discovery.ts";
 import { PASS, type RouteContext } from "./table.ts";
@@ -36,6 +37,7 @@ const COMPANY_ACTION = /^\/api\/cofactory\/companies\/([\w-]+)\/(freeze|unfreeze
 const TRACE = /^\/api\/cofactory\/trace\/(session|company)\/([\w-]+)$/;
 const RAILS = /^\/api\/cofactory\/companies\/([\w-]+)\/rails$/;
 const SEAT = /^\/api\/cofactory\/seat\/([\w-]+)$/;
+const APPROVAL = /^\/api\/cofactory\/approvals\/([\w-]+)$/;
 const DAY_MS = 24 * 60 * 60_000;
 
 export interface CofactoryRouteDeps {
@@ -48,6 +50,8 @@ export interface CofactoryRouteDeps {
   validation: () => { sprints: Sprints; rails: Rails; orders: Orders };
   relatedParties?: { get(): { emails: string[]; domains: string[] }; set(value: { emails: string[]; domains: string[] }): void };
   settings?: Settings;
+  factoryOpened?: (leadBotId: string) => void;
+  approvals?: { store: () => Approvals; settle(id: string, approve: boolean, note: string | null): Promise<{ ok: true; approval: Approval; outcome: string } | { ok: false; reason: string }> };
   traceDeps: () => TraceDeps;
   tick: () => Promise<void>;
   owner: (auth: RequestAuth) => boolean;
@@ -131,7 +135,10 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
       const seatPath = SEAT.exec(path);
       if (seatPath && deps.settings) {
         const { sprints, orders, rails } = deps.validation();
-        return json(res, 200, seatView({ botId: seatPath[1]!, book, runtime: runtime?.store ?? null, discovery: deps.discovery(), sprints, orders, rails, settings: deps.settings.get(), now: now() }));
+        return json(res, 200, seatView({ botId: seatPath[1]!, book, runtime: runtime?.store ?? null, discovery: deps.discovery(), sprints, orders, rails, settings: deps.settings.get(), approvals: deps.approvals?.store() ?? null, now: now() }));
+      }
+      if (path === "/api/cofactory/approvals" && deps.approvals) {
+        return json(res, 200, { approvals: deps.approvals.store().pending() });
       }
       if (path === "/api/cofactory/settings" && deps.settings) {
         const deposited = book.entries({}).filter((entry) => entry.kind === "deposit").reduce((sum, entry) => sum + entry.cents, 0);
@@ -230,11 +237,21 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
       record(companyId, "rails", Object.keys(input).filter((key) => input[key as keyof typeof input] !== undefined).join(", "));
       return json(res, 200, { ok: true, rails: rails.summary(companyId) });
     }
+    const approvalPath = APPROVAL.exec(path);
+    if (approvalPath && deps.approvals) {
+      const input = parse(z.object({ decision: z.enum(["approve", "decline"]), note: z.string().trim().max(1_000).optional() }));
+      if (!input) return;
+      const settled = await deps.approvals.settle(approvalPath[1]!, input.decision === "approve", input.note || null);
+      if (!settled.ok) return json(res, 409, { error: settled.reason });
+      record(settled.approval.companyId, "approval", `${input.decision} ${settled.approval.kind}: ${settled.outcome}`);
+      return json(res, 200, settled);
+    }
     if (path === "/api/cofactory/settings" && deps.settings) {
       const input = parse(z.object({
         country: z.string().regex(/^[A-Z]{2}$/).nullable().optional(), region: z.string().max(80).nullable().optional(),
         budgetCents: z.number().int().min(0).max(100_000_000).optional(), companyCapCents: z.number().int().min(0).max(100_000_000).optional(),
         allocation: z.enum(["fixed", "dynamic"]).optional(), closeAfterDays: z.number().int().min(2).max(30).optional(),
+        goLiveDays: z.number().int().min(3).max(60).optional(), dailyModelCents: z.number().int().min(0).max(1_000_000).optional(),
         approvals: z.object({ launch: z.enum(["ask", "auto"]).optional(), spendOverCents: z.number().int().min(0).max(10_000_000).optional(), kill: z.enum(["ask", "tell"]).optional() }).optional(),
         onboarded: z.boolean().optional(),
         hunches: z.array(z.string().trim().min(3).max(300)).max(3).optional(), never: z.array(z.string().trim().min(2).max(300)).max(20).optional(),
@@ -291,6 +308,8 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
         record(null, "territories", territories.join("; "));
       }
       const staffed = await runtime.launcher.staffFactory();
+      const lead = staffed.find((seat) => seat.role === "lead");
+      if (lead) deps.factoryOpened?.(lead.botId);
       const batch = discovery.store.openBatch() ? null : discovery.startBatch("the factory's first search");
       if (batch?.ok) void deps.tick();
       deps.settings.set({ onboardedAt: settings.onboardedAt ?? now() });
