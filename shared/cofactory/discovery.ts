@@ -43,7 +43,8 @@ export interface Signal {
   snapshotId: string | null;
 }
 
-export const NICHE_STATUSES = ["candidate", "shortlisted", "rejected", "claimed", "released"] as const;
+/** `selected`: chosen from a closed batch for a dossier. */
+export const NICHE_STATUSES = ["candidate", "selected", "shortlisted", "rejected", "claimed", "released"] as const;
 export type NicheStatus = (typeof NICHE_STATUSES)[number];
 
 /** One buyer × one job × one channel, resting on signals from independent sources and a factory-unique input. */

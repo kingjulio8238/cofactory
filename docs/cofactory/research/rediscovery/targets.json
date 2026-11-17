@@ -1,0 +1,92 @@
+[
+  {
+    "name": "Pouncio",
+    "url": "https://pouncio.com/",
+    "buyer": "Vinted resellers",
+    "job": "auto-buying underpriced Vinted listings across 21 markets before other resellers",
+    "channel": "SEO, content marketing, Google Ads",
+    "domain": "second-hand resale",
+    "launch_date": "2026-09-28",
+    "launch_evidence": {
+      "url": "https://trustmrr.com/startup/pouncio.md",
+      "quote": "Founded date: 2026-09-28"
+    },
+    "revenue_evidence": {
+      "url": "https://trustmrr.com/startup/pouncio.md",
+      "quote": "Current active subscriptions: 6"
+    },
+    "price": "Free €0 · Plus €49.99/mo · Pro €129.99/mo · Executive on request. Yearly billing 20% off."
+  },
+  {
+    "name": "amirelay",
+    "url": "https://amirelay.com/",
+    "buyer": "Vinted resellers in France",
+    "job": "outsourced storage, pick-and-pack and shipping of Vinted orders",
+    "channel": "",
+    "domain": "e-commerce fulfillment (3PL)",
+    "launch_date": "2026-07-01",
+    "launch_evidence": {
+      "url": "https://trustmrr.com/startup/ami.md",
+      "quote": "Founded date: 2026-07-01"
+    },
+    "revenue_evidence": {
+      "url": "https://trustmrr.com/startup/ami.md",
+      "quote": "| All time | $68.12 |"
+    },
+    "price": "Pay-as-you-go wallet billing; €20 per m³/month for storage, €1.50 per order for pick & pack, €3 per return."
+  },
+  {
+    "name": "Roast My BnB",
+    "url": "https://roastmybnb.com/",
+    "buyer": "Airbnb hosts",
+    "job": "audit of a listing's booking conversion with prioritized fixes",
+    "channel": "",
+    "domain": "short-term rental hosting",
+    "launch_date": "2026-07-24",
+    "launch_evidence": {
+      "url": "https://trustmrr.com/startup/roast-my-bnb.md",
+      "quote": "Founded date: 2026-07-24"
+    },
+    "revenue_evidence": {
+      "url": "https://trustmrr.com/startup/roast-my-bnb.md",
+      "quote": "| All time | $29.00 |"
+    },
+    "price": "First guest and score free; full report and fix package $29 per listing, one-time"
+  },
+  {
+    "name": "HotelBase",
+    "url": "https://hotelbase.ai/",
+    "buyer": "independent hotel operators",
+    "job": "24/7 AI guest concierge that converts OTA lookers into direct bookings",
+    "channel": "",
+    "domain": "independent hotel hospitality",
+    "launch_date": "2026-07-29",
+    "launch_evidence": {
+      "url": "https://trustmrr.com/startup/hotelbase.md",
+      "quote": "Founded date: 2026-07-29"
+    },
+    "revenue_evidence": {
+      "url": "https://trustmrr.com/startup/hotelbase.md",
+      "quote": "| All time | $345 |"
+    },
+    "price": "Free: $0/mo, Starter: $49/mo, Growth: $149/mo, Pro: $399/mo"
+  },
+  {
+    "name": "Beautyflow",
+    "url": "https://beautyflow.be/",
+    "buyer": "beauty institute owners in Belgium",
+    "job": "salon agenda, online booking, reminders and till in one tool",
+    "channel": "",
+    "domain": "beauty salons",
+    "launch_date": "2026-08-05",
+    "launch_evidence": {
+      "url": "https://trustmrr.com/startup/beautyflow-1.md",
+      "quote": "Founded date: 2026-08-05"
+    },
+    "revenue_evidence": {
+      "url": "https://trustmrr.com/startup/beautyflow-1.md",
+      "quote": "| All time | $621 |"
+    },
+    "price": "€39/month, +€19/month for online payments"
+  }
+]

@@ -2,6 +2,7 @@ import type { Company, FactoryMessage, Membership, Role } from "../../../shared/
 import type { Book } from "../book.ts";
 import type { Truth } from "../truth/store.ts";
 import type { Discovery } from "../discovery/discovery.ts";
+import type { Dossiers } from "../dossier/dossiers.ts";
 import type { Sessions } from "./sessions.ts";
 import type { RuntimeStore } from "./store.ts";
 
@@ -44,6 +45,7 @@ export interface SchedulerDeps {
   store: RuntimeStore;
   sessions: Sessions;
   discovery?: Discovery;
+  dossiers?: Dossiers;
   now?: () => number;
 }
 
@@ -51,6 +53,9 @@ export interface SchedulerDeps {
 export function createScheduler(deps: SchedulerDeps) {
   const { book, truth, store, sessions } = deps;
   const now = deps.now ?? Date.now;
+
+  /** A session counts against an allowance only if a turn of it actually ran; one that never started took nothing. */
+  const ranARound = (sessionId: string) => store.sessionEvents(sessionId).some((event) => event.type === "round_settled");
 
   const seatFor = (companyId: string | null, role: Role): Membership | undefined =>
     book.members().find((member) => member.companyId === companyId && member.role === role);
@@ -109,7 +114,7 @@ export function createScheduler(deps: SchedulerDeps) {
     const status = discovery.batchStatus();
     if (!status || status.batch.closedAt !== null) return false;
     const trigger = `discovery:${status.batch.id}`;
-    const past = store.sessionsFor(null, 200).filter((session) => session.botId === scout.botId && session.trigger === trigger);
+    const past = store.sessionsFor(null, 200).filter((session) => session.botId === scout.botId && session.trigger === trigger && (ranARound(session.id) || session.status === "running"));
     const last = past[0];
     if (last?.status === "waiting" && last.endRequested?.nextWakeAt && now() < last.endRequested.nextWakeAt) return false;
     if (past.length >= sessions.policy.discoverySessionsPerBatch) {
@@ -132,6 +137,38 @@ export function createScheduler(deps: SchedulerDeps) {
     return !("refused" in result) && result.started;
   }
 
+  /** Wakes the scout to research a selected niche's dossier, one niche at a time, within the niche's session allowance. */
+  async function wakeForDossier(): Promise<boolean> {
+    const discovery = deps.discovery, dossiers = deps.dossiers;
+    const scout = seatFor(null, "scout");
+    if (!discovery || !dossiers || !scout || store.liveFor(scout.botId)) return false;
+    for (const nicheId of dossiers.wanted()) {
+      const niche = discovery.store.niche(nicheId)!;
+      const trigger = `dossier:${nicheId}`;
+      const past = store.sessionsFor(null, 500).filter((session) => session.botId === scout.botId && session.trigger === trigger && ranARound(session.id));
+      if (past.length >= sessions.policy.dossierSessionsPerNiche) {
+        discovery.store.setNicheStatus(nicheId, "rejected");
+        store.note(past[0]!.id, "niche_rejected", { nicheId, why: `no passing dossier after ${past.length} sessions` });
+        continue;
+      }
+      const previous = dossiers.latest(nicheId);
+      const signals = niche.signalIds.map((id) => discovery.store.signal(id)).filter((signal) => signal !== null);
+      const result = await sessions.request({
+        companyId: null, botId: scout.botId, kind: "deep", trigger,
+        objective: `Research the dossier for "${niche.buyer} · ${niche.job}" and submit it with cofactory_submit_dossier (niche_id ${nicheId}).`,
+        doneWhen: "the dossier is submitted and scores without a veto, or the research shows the niche does not hold (say so in the journal)",
+        context: [
+          `Niche: buyer ${niche.buyer}; job ${niche.job}; channel ${niche.channel}.`,
+          `Gap as proposed: ${niche.whyGap}`,
+          `Its signals:\n${signals.map((signal) => `- [${signal.sourceType}] ${signal.url}: "${signal.quote}"`).join("\n")}`,
+          previous ? `Previous dossier v${previous.version} was ${previous.status}: ${[...previous.verification.criticalFailures, ...previous.verification.structural, ...previous.verification.claims.filter((claim) => claim.verdict !== "verified").map((claim) => `${claim.role} ${claim.url} ${claim.verdict}`), ...(previous.score?.vetoes.map((item) => `veto ${item.veto}: ${item.why}`) ?? []), `${previous.qa.unknown} questions unknown`].join("; ")}` : "",
+        ].filter(Boolean).join("\n"),
+      });
+      return !("refused" in result) && result.started;
+    }
+    return false;
+  }
+
   return {
     /** One pass: message wakes, then for each live company event wakes and its CEO's cadence, then the lead's cadence. */
     async tick(): Promise<{ started: number }> {
@@ -146,6 +183,7 @@ export function createScheduler(deps: SchedulerDeps) {
         if (!("refused" in result) && result.started) started++;
       }
       if (await wakeForDiscovery()) started++;
+      else if (await wakeForDossier()) started++;
       const lead = seatFor(null, "lead");
       if (lead && cadenceDue(lead)) {
         const result = await sessions.request({ companyId: null, botId: lead.botId, kind: "operating", trigger: "cadence", ...FACTORY_GOAL });

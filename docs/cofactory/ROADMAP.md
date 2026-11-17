@@ -424,7 +424,87 @@ The three niches:
 - Live smoke on a real model: see the progress log.
 
 ### P2 Dossiers and scoring
-Deep-session dossiers, practitioner evidence from the web, the rubric, vetoes and the champion rule.
+
+**Why:** this is the expensive filter. A plausible niche is cheap; one whose buyers, prices, pain and gap all check
+out against the world is not. Paul Graham's rules decide the gates: "discover, not persuade", "few who need it
+badly", "one buyer can say yes", "never average judges".
+
+**Flow:**
+1. A closed batch selects its strongest candidates (top 5 by their own evidence: buyer-voice signals, sites, boring,
+   owner inputs, crowding).
+2. The scout gets a deep session per selected niche, with the niche's signals and any earlier dossier's failures in
+   the prompt.
+3. The scout submits a structured dossier, which code verifies, interrogates and scores.
+4. The best clean scores make the shortlist, and a shortlisted niche's registry claim goes live.
+5. A niche with no passing dossier after 2 sessions that actually ran is rejected.
+
+| Piece | Where | What it does |
+|---|---|---|
+| Dossier contract | `shared/cofactory/dossier.ts` | Buyers, practitioner pains, spend, buyer count, incumbents, gap, first-ten plan, failure modes, risks, offer (detail below) |
+| Verifier | `server/cofactory/dossier/verify.ts` | Checks every link and quote against the page, with critical and structural checks (detail below) |
+| Adversarial Q&A | `server/cofactory/dossier/qa.ts` | 10 questions drawn from a bank of 16, seeded by the niche and version, answered only from verified evidence. More than 3 unknown fails. |
+| Scoring and vetoes | `server/cofactory/dossier/score.ts` | Weighted features and 10 hard vetoes (detail below) |
+| Service | `server/cofactory/dossier/dossiers.ts` | Selection, versioned submissions, the shortlist, and the champion rule: one seat may advance a clean, unshortlisted dossier with at least one cited verified signal or claim check, and a specific reason. Vetoed or unverified dossiers cannot be championed. Scores are never averaged. |
+| Tools | `cofactory_submit_dossier`, `cofactory_dossiers`, `cofactory_champion`; closing a batch now selects | Every submission is a `dossier.submit` decision linked to each claim check behind it |
+| Routes | `GET /api/cofactory/dossiers`, `GET /api/cofactory/dossiers/:id`, `POST /api/cofactory/dossiers/select` (by batch or by niche ids, including re-selecting a rejected niche), `POST /api/cofactory/discovery/abandon` | — |
+| Rediscovery | `server/cofactory/evals/rediscovery.ts`, `pnpm cofactory:rediscovery`, `docs/cofactory/research/rediscovery/targets.json` | Real niche businesses launched after the model's cutoff. The profile is built from each one's domain alone, and recall measures whether the factory finds that niche. |
+
+**The dossier contract** is built so that code can check every claim. It holds:
+- 5–10 buyers, each with a page and a public contact page;
+- practitioner pains, each with its source type;
+- spend lines whose amount must be in their quote;
+- a buyer count whose value must be in its quote;
+- incumbents and what they miss;
+- the gap and the hidden reasons ruled out;
+- a first-ten plan;
+- failure modes;
+- risks;
+- an offer with a cited human alternative and the cost to serve.
+
+**The verifier:**
+- Every link loads, and every quote is on its page. This uses the truth layer, so PDFs are read too.
+- Critical checks: the buyer count and the human-alternative price must be the numbers stated in their own quotes.
+- Structural checks:
+  - at least 5 reachable buyers;
+  - at least 5 practitioner pages from buyers' own sources on 2 or more sites;
+  - a verified spend line;
+  - 3 specific failure modes;
+  - a specific gap and first-ten plan.
+- Pass bar: at least 95% of claims verified, with no critical or structural failure.
+
+**Scoring** weights seven features:
+
+| Feature | Weight |
+|---|---|
+| Demand | 0.2 |
+| Money | 0.2 |
+| Price advantage | 0.15 |
+| Reach × buyer-count band | 0.15 |
+| Moat (boring, owner inputs) | 0.1 |
+| Incumbent gap | 0.1 |
+| Crowding | 0.1 |
+
+The ten hard vetoes:
+- licensed advice;
+- regulated claims;
+- a platform's terms;
+- a gatekeeper over 50%;
+- a procurement path, or a price over a card limit of $500 a month;
+- an unverified dossier;
+- a failed Q&A;
+- a price above a third of the human alternative;
+- under 50% margin at the heaviest usage;
+- a niche another factory now holds live.
+
+**Evals (`pnpm cofactory:eval`, now 10 suites):**
+
+| Suite | What it checks | Result |
+|---|---|---|
+| `dossier-verifier` | A hand-labelled good dossier and 8 ways to get it wrong: invented pains, an inflated buyer count, a wrong human price, dead buyers, one-site voices, news posing as practitioners, a vague plan, a wrong spend amount | 9/9, `false_pass` = 0, good dossier 100% verified |
+| `adversarial-qa` | The full dossier passes all 20 seeded draws; a thin one (or one with failed evidence) fails all 20; draws are deterministic | Pass |
+| `scoring` | Each of 9 veto cases fires; a strong dossier outranks a weak one (71.9 vs 57.6); shortlist and champion rules hold | Pass |
+
+- Breaking the buyer-count check, the Q&A's evidence check or the price-ratio veto each fails its suite.
 
 ### P3 Offer and validation
 Offer page, payment link, outreach on any channel inside send caps, and a validation sprint of 7 days or less.

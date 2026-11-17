@@ -79,6 +79,8 @@ export interface RuntimePolicy {
   zombieGraceMs: number;
   /** Deep sessions one discovery batch may take before it is `discovery_stuck` and the scout stops being woken for it. */
   discoverySessionsPerBatch: number;
+  /** Deep sessions one niche's dossier may take; after that the niche is rejected (kill fast, ignore sunk cost). */
+  dossierSessionsPerNiche: number;
 }
 
 export const DEFAULT_RUNTIME_POLICY: RuntimePolicy = {
@@ -95,4 +97,5 @@ export const DEFAULT_RUNTIME_POLICY: RuntimePolicy = {
   fakeWorkCents: 1_500,
   zombieGraceMs: 15 * 60_000,
   discoverySessionsPerBatch: 4,
+  dossierSessionsPerNiche: 2,
 };

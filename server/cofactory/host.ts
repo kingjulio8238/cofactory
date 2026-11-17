@@ -18,6 +18,7 @@ import type { TraceDeps } from "./observe/trace.ts";
 import { createDiscovery, type Discovery } from "./discovery/discovery.ts";
 import { openLocalRegistry } from "./discovery/registry.ts";
 import { openDiscoveryStore } from "./discovery/store.ts";
+import { createDossiers, type Dossiers } from "./dossier/dossiers.ts";
 
 export const COFACTORY_INTERNAL_MCP_PATH = "/api/internal/cofactory/mcp";
 
@@ -61,9 +62,11 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
   let runtime: Runtime | null = null;
   let observer: Observer | null = null;
   let discovery: Discovery | null = null;
+  let dossiers: Dossiers | null = null;
   let registryClose: (() => void) | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
   let ticking = false;
+  let recovered: Promise<void> | null = null;
   const log = deps.log ?? ((line: string) => console.log(line));
   const books = (): Book => (book ??= openBook(join(deps.dataDir, "cofactory.db")));
   const evidence = (): Truth => (truth ??= openTruth(join(deps.dataDir, "cofactory-evidence")));
@@ -74,8 +77,10 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     const registry = openLocalRegistry(join(deps.dataDir, "cofactory-registry.db"));
     registryClose = () => registry.close();
     discovery = createDiscovery({ store: openDiscoveryStore(join(deps.dataDir, "cofactory-discovery.db")), truth: evidence(), registry });
+    dossiers = createDossiers({ store: discovery.store, truth: evidence(), registry, crossFactoryBlock: discovery.policy.crossFactoryBlock });
     return discovery;
   };
+  const dossierService = (): Dossiers => { discoveryService(); return dossiers!; };
   const traceDeps = (): TraceDeps => ({ book: books(), truth: evidence(), observe: observe().store, runtime: runtimeParts()?.store ?? null, discovery: discoveryService().store });
 
   function runtimeParts(): Runtime | null {
@@ -98,7 +103,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       interrupt: turns.interrupt,
     };
     const sessions = createSessions({ store, book: books(), workspaces, turns: port, policy, log });
-    const scheduler = createScheduler({ book: books(), truth: evidence(), store, sessions, discovery: discoveryService() });
+    const scheduler = createScheduler({ book: books(), truth: evidence(), store, sessions, discovery: discoveryService(), dossiers: dossierService() });
     const launcher = deps.createBot ? createLauncher({ book: books(), workspaces, createBot: deps.createBot }) : undefined;
     runtime = { store, sessions, scheduler, launcher, policy };
     return runtime;
@@ -109,6 +114,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     const parts = runtimeParts();
     if (!parts || ticking) return;
     ticking = true;
+    await recovered;
     try {
       await parts.sessions.sweep();
       for (const alarm of checkAlarms({ book: books(), truth: evidence(), store: parts.store, policy: parts.policy })) log(`cofactory: alarm ${alarm.kind}: ${alarm.detail}`);
@@ -126,6 +132,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     runtime: runtimeParts,
     observe,
     discovery: discoveryService,
+    dossiers: dossierService,
     traceDeps,
     tick,
 
@@ -145,7 +152,8 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     async start(): Promise<void> {
       const parts = runtimeParts();
       if (!parts || timer) return;
-      await parts.sessions.recover();
+      recovered = parts.sessions.recover();
+      await recovered;
       timer = setInterval(() => { void tick(); }, deps.tickMs ?? 30_000);
       timer.unref?.();
       void tick();
@@ -179,7 +187,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       const params = (request.params && typeof request.params === "object" ? request.params : {}) as { name?: unknown; arguments?: unknown };
       const parts = runtimeParts();
       const result = await runTool({
-        book: books(), truth: evidence(), seat, actor: `${seat.role}:${ctx.botName}`, observe: observe(), discovery: discoveryService(),
+        book: books(), truth: evidence(), seat, actor: `${seat.role}:${ctx.botName}`, observe: observe(), discovery: discoveryService(), dossiers: dossierService(),
         session: parts?.store.liveFor(seat.botId) ?? null,
         ...(parts ? { sessions: parts.sessions } : {}), ...(parts?.launcher ? { launcher: parts.launcher } : {}),
       }, params.name, params.arguments);
@@ -206,6 +214,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       discovery?.store.close();
       registryClose?.();
       discovery = null;
+      dossiers = null;
       registryClose = null;
       book?.close();
       truth?.close();

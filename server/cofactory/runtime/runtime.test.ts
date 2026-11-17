@@ -13,7 +13,7 @@ import { openTruth } from "../truth/store.ts";
 import { checkAlarms } from "./alarms.ts";
 import { createLauncher } from "./launcher.ts";
 import { createScheduler } from "./scheduler.ts";
-import { createSessions, type TurnPort } from "./sessions.ts";
+import { createSessions, START_RETRY_MS, type TurnPort } from "./sessions.ts";
 import { openRuntimeStore } from "./store.ts";
 import { createWorkspaces } from "./workspace.ts";
 
@@ -126,6 +126,10 @@ describe("cofactory sessions", () => {
     expect(r.starts).toHaveLength(2);
     expect(r.store.session(started.session.id)).toMatchObject({ status: "running", rounds: 2 });
     expect(r.store.sessionEvents(started.session.id).filter((event) => event.type === "start_retry")).toHaveLength(2);
+    r.busy(START_RETRY_MS.length + 1);
+    await r.settle(null);
+    expect(r.interrupted).toEqual([started.session.threadId]);
+    expect(r.store.session(started.session.id)).toMatchObject({ status: "running", rounds: 3 });
     r.busy(99);
     await r.settle(null);
     expect(r.store.session(started.session.id)).toMatchObject({ status: "interrupted", stopReason: "the turn could not start: this thread is already working: interrupt it first" });
@@ -173,6 +177,15 @@ describe("cofactory sessions", () => {
     await r.restart();
     await r.sessions.recover();
     expect(r.store.session(first.session.id)).toMatchObject({ status: "interrupted" });
+  });
+
+  it("leaves alone a session this process started when recovery runs late", async () => {
+    const r = rig();
+    const started = await request(r);
+    if ("refused" in started) throw new Error(started.refused);
+    await r.sessions.recover();
+    expect(r.starts).toHaveLength(1);
+    expect(r.store.sessionEvents(started.session.id).map((event) => event.type)).not.toContain("restarted");
   });
 
   it("sweeps a zombie that never settles: interrupted, alarmed, ended", async () => {

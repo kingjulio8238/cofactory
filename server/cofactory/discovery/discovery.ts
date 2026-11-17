@@ -155,6 +155,13 @@ export function createDiscovery(deps: DiscoveryDeps) {
     recordSignal,
     proposeNiche,
     batchStatus,
+    /** Ends the open batch however short it is; its niches stay as they are. */
+    abandonBatch(): { ok: true; status: NonNullable<ReturnType<typeof batchStatus>> } | Refusal {
+      const open = store.openBatch();
+      if (!open) return { ok: false, reason: "no batch is open" };
+      store.closeBatch(open.id, now());
+      return { ok: true, status: batchStatus(open.id)! };
+    },
     closeBatch(): { ok: true; status: NonNullable<ReturnType<typeof batchStatus>> } | Refusal {
       const open = store.openBatch();
       if (!open) return { ok: false, reason: "no batch is open" };

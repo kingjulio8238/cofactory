@@ -35,8 +35,11 @@ export interface SessionDeps {
   defer?: (work: () => void, ms: number) => void;
 }
 
-/** Waits before each new try at starting a round the conversation was not ready for. */
-const START_RETRY_MS = [500, 1_000, 2_000, 4_000, 8_000, 16_000];
+/**
+ * Waits before each new try at starting a round the conversation was not ready for: about five minutes in all. A
+ * conversation stays busy briefly after a settle, and for minutes when dusk resumes a turn a restart cut off.
+ */
+export const START_RETRY_MS = [500, 1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 60_000, 60_000, 60_000, 60_000];
 
 const RESTARTED = "dusk restarted while this session was running. Whatever you were doing may or may not have finished: check the real state (files, cofactory_status, the page or the inbox) before repeating any action.";
 
@@ -84,8 +87,11 @@ export function createSessions(deps: SessionDeps) {
   }
 
   const defer = deps.defer ?? ((work: () => void, ms: number) => { setTimeout(work, ms).unref?.(); });
+  /** Sessions whose rounds this process started: recovery after a restart must leave them alone. */
+  const owned = new Set<string>();
 
   async function runRound(session: Session, prompt: string): Promise<void> {
+    owned.add(session.id);
     store.roundStarted(session.id);
     await startRound(session, store.session(session.id)?.rounds ?? 0, prompt, 0);
   }
@@ -103,6 +109,12 @@ export function createSessions(deps: SessionDeps) {
       if (attempt < START_RETRY_MS.length) {
         store.note(session.id, "start_retry", { attempt: attempt + 1, why });
         defer(() => { void track(startRound(session, round, prompt, attempt + 1)); }, START_RETRY_MS[attempt]!);
+        return;
+      }
+      if (attempt === START_RETRY_MS.length) {
+        store.note(session.id, "stale_turn_interrupted", { why });
+        await turns.interrupt(session.botId, session.threadId).catch(() => {});
+        defer(() => { void track(startRound(session, round, prompt, attempt + 1)); }, START_RETRY_MS[0]!);
         return;
       }
       await finish(session.id, "interrupted", `the turn could not start: ${why}`);
@@ -200,6 +212,7 @@ export function createSessions(deps: SessionDeps) {
     /** After a restart: a session that still has time is re-entered with a note that its last action is uncertain. */
     async recover(): Promise<void> {
       for (const session of store.liveSessions()) {
+        if (owned.has(session.id)) continue;
         store.note(session.id, "restarted");
         const left = session.startedAt + session.budgetMs - now();
         if (left < policy.reserveMs) await finish(session.id, "interrupted", "dusk restarted with no time left in the session");

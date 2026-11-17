@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 
 import type { DiscoveryBatch, FactoryProfile, Niche, NicheStatus, Signal } from "../../../shared/cofactory/discovery.ts";
+import type { Dossier, DossierStatus } from "../../../shared/cofactory/dossier.ts";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS profile (id INTEGER PRIMARY KEY CHECK (id = 1), json TEXT NOT NULL);
@@ -14,6 +15,10 @@ CREATE TABLE IF NOT EXISTS niches (
   id TEXT PRIMARY KEY, factory_id TEXT NOT NULL, batch_id TEXT, at INTEGER NOT NULL, buyer TEXT NOT NULL, job TEXT NOT NULL, channel TEXT NOT NULL,
   why_gap TEXT NOT NULL, signal_ids TEXT NOT NULL, unique_input_ids TEXT NOT NULL, boring INTEGER NOT NULL, cross_field INTEGER NOT NULL,
   status TEXT NOT NULL, density INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS dossiers (
+  id TEXT PRIMARY KEY, niche_id TEXT NOT NULL, factory_id TEXT NOT NULL, version INTEGER NOT NULL, at INTEGER NOT NULL, body TEXT NOT NULL,
+  verification TEXT NOT NULL, qa TEXT NOT NULL, score TEXT, status TEXT NOT NULL, champion TEXT, UNIQUE (niche_id, version)
 );
 CREATE TRIGGER IF NOT EXISTS signals_no_update BEFORE UPDATE ON signals BEGIN SELECT RAISE(ABORT, 'signals are append-only'); END;
 `;
@@ -102,9 +107,39 @@ export function openDiscoveryStore(file: string) {
       return rows.map(toNiche);
     },
 
+    addDossier(dossier: Dossier): void {
+      db.prepare("INSERT INTO dossiers (id, niche_id, factory_id, version, at, body, verification, qa, score, status, champion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(dossier.id, dossier.nicheId, dossier.factoryId, dossier.version, dossier.at, JSON.stringify(dossier.body), JSON.stringify(dossier.verification), JSON.stringify(dossier.qa),
+          dossier.score ? JSON.stringify(dossier.score) : null, dossier.status, dossier.champion ? JSON.stringify(dossier.champion) : null);
+    },
+    setDossierStatus(id: string, status: DossierStatus, champion?: Dossier["champion"]): void {
+      if (champion === undefined) db.prepare("UPDATE dossiers SET status = ? WHERE id = ?").run(status, id);
+      else db.prepare("UPDATE dossiers SET status = ?, champion = ? WHERE id = ?").run(status, JSON.stringify(champion), id);
+    },
+    dossier(id: string): Dossier | null {
+      const row = db.prepare("SELECT * FROM dossiers WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+      return row ? toDossier(row) : null;
+    },
+    /** The newest version of each niche's dossier. */
+    latestDossiers(): Dossier[] {
+      return (db.prepare("SELECT d.* FROM dossiers d JOIN (SELECT niche_id, MAX(version) AS v FROM dossiers GROUP BY niche_id) m ON d.niche_id = m.niche_id AND d.version = m.v ORDER BY d.at").all() as Array<Record<string, unknown>>).map(toDossier);
+    },
+    dossiersOf(nicheId: string): Dossier[] {
+      return (db.prepare("SELECT * FROM dossiers WHERE niche_id = ? ORDER BY version").all(nicheId) as Array<Record<string, unknown>>).map(toDossier);
+    },
+
     close(): void {
       db.close();
     },
+  };
+}
+
+function toDossier(row: Record<string, unknown>): Dossier {
+  return {
+    id: String(row.id), nicheId: String(row.niche_id), factoryId: String(row.factory_id), version: Number(row.version), at: Number(row.at),
+    body: JSON.parse(String(row.body)), verification: JSON.parse(String(row.verification)), qa: JSON.parse(String(row.qa)),
+    score: row.score === null ? null : JSON.parse(String(row.score)), status: row.status as DossierStatus,
+    champion: row.champion === null ? null : JSON.parse(String(row.champion)),
   };
 }
 

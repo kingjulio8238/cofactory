@@ -19,6 +19,7 @@ import type { Launcher } from "./runtime/launcher.ts";
 import type { Sessions } from "./runtime/sessions.ts";
 import type { Observer } from "./observe/observer.ts";
 import type { Discovery } from "./discovery/discovery.ts";
+import type { Dossiers } from "./dossier/dossiers.ts";
 import { SIGNAL_KINDS, SOURCE_TYPES } from "../../shared/cofactory/discovery.ts";
 import type { DecisionKind, EvidenceLink } from "../../shared/cofactory/observe.ts";
 import type { Session } from "../../shared/cofactory/runtime.ts";
@@ -44,6 +45,24 @@ const evidence = z.object({
   note: z.string().max(1_000).optional(),
 });
 const cents = z.number().int().positive().max(100_000_000);
+const cited = z.object({ url: z.string().url().max(2_000), quote: z.string().min(6).max(1_500) });
+const per = z.enum(["month", "year", "job", "hour"]);
+const dossierBody = z.object({
+  buyers: z.array(z.object({ name: z.string().min(2).max(200), url: z.string().url().max(2_000), contactUrl: z.string().url().max(2_000), whyFit: z.string().max(500) })).max(15),
+  pains: z.array(cited.extend({ sourceType: z.enum(SOURCE_TYPES) })).max(20),
+  spend: z.array(cited.extend({ amountCents: z.number().int().nonnegative(), per })).max(10),
+  buyerCount: cited.extend({ value: z.number().int().nonnegative() }),
+  incumbents: z.array(z.object({ name: z.string().min(1).max(200), url: z.string().url().max(2_000), whatTheyMiss: z.string().max(1_000), priceCents: z.number().int().nonnegative().nullable() })).max(10),
+  gap: z.object({ why: z.string().max(2_000), hiddenReasonsRuledOut: z.string().max(2_000) }),
+  firstTen: z.object({ channel: z.string().max(300), steps: z.string().max(3_000) }),
+  failureModes: z.array(z.string().max(500)).max(10),
+  risks: z.object({ licensedAdvice: z.boolean(), regulatedClaims: z.boolean(), platformTos: z.string().max(200).nullable(), gatekeeperShare: z.number().min(0).max(1), procurement: z.boolean(), notes: z.string().max(2_000) }),
+  offer: z.object({
+    archetype: z.enum(["done_for_you", "monitoring", "micro_tool", "templates", "directory"]), priceCents: z.number().int().positive(), per: z.enum(["month", "year", "job"]),
+    humanAlternative: cited.extend({ amountCents: z.number().int().positive(), per, hoursPerMonth: z.number().positive().optional() }),
+    costToServeCents: z.number().int().nonnegative(),
+  }),
+});
 
 export interface ToolContext {
   book: Book;
@@ -55,6 +74,7 @@ export interface ToolContext {
   now?: () => number;
   observe?: Observer;
   discovery?: Discovery;
+  dossiers?: Dossiers;
   /** The seat's running session, which decisions and tool calls are filed under. */
   session?: Session | null;
 }
@@ -258,13 +278,67 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
   }),
   spec({
     name: "cofactory_close_batch",
-    description: "Close the open discovery batch once it has its target number of niches and meets the boring and cross-field quotas.",
+    description: "Close the open discovery batch once it has its target number of niches and meets the boring and cross-field quotas. Closing selects the strongest candidates for dossiers.",
     roles: ["scout", "lead"],
     input: z.object({}),
-    run(_args, { discovery }) {
+    run(_args, ctx) {
+      const { discovery, dossiers } = ctx;
       if (!discovery) return refused("discovery is not running");
       const closed = discovery.closeBatch();
-      return closed.ok ? ok({ status: closed.status }) : refused(closed.reason);
+      if (!closed.ok) return refused(closed.reason);
+      const selected = dossiers?.select(closed.status.batch.id) ?? [];
+      for (const id of selected) decide(ctx, "niche.select", "allowed", "selected for a dossier from the closed batch", [{ type: "niche", id }], null);
+      return ok({ status: closed.status, selectedForDossiers: selected });
+    },
+  }),
+  spec({
+    name: "cofactory_submit_dossier",
+    description: [
+      "Submit the dossier for a selected niche: the one-page case code can check. Every URL is fetched and every quote must be on its page.",
+      "Needs: 5-10 buyers (a page proving each exists and a public contact page); at least 5 practitioner pain quotes from buyers' own pages (forum, review, job board, Q&A) on 2+ sites;",
+      "what buyers spend today (amountCents must be the amount in the quote); the buyer count (value must be the number in its quote); incumbents and what they miss;",
+      "why the gap exists and which hidden reasons (monopoly, regulation) you ruled out; a concrete plan for the first ten customers; 3+ specific failure modes;",
+      "risks; and the offer, whose price must be at most a third of the human alternative (cited) with at least half the price left after the cost to serve the heaviest customer.",
+      "It is then asked 10 random questions answered only from verified evidence (more than 3 unknown fails), and scored. A failed dossier can be fixed and resubmitted.",
+    ].join(" "),
+    roles: ["scout"],
+    input: z.object({ niche_id: z.string().min(1), dossier: dossierBody }),
+    async run(args, ctx) {
+      if (!ctx.dossiers) return refused("dossiers are not running");
+      const result = await ctx.dossiers.submit(args.niche_id, args.dossier);
+      if (!result.ok) { decide(ctx, "dossier.submit", "refused", result.reason, [{ type: "niche", id: args.niche_id }], null); return refused(result.reason); }
+      const { dossier } = result;
+      const links = dossier.verification.claims.filter((claim) => claim.checkId !== null).map((claim) => ({ type: "claim_check" as const, id: claim.checkId!, url: claim.url }));
+      decide(ctx, "dossier.submit", dossier.status === "failed" || dossier.status === "dropped" ? "refused" : "allowed",
+        `v${dossier.version} ${dossier.status}: score ${dossier.score?.score ?? "-"}, ${Math.round(dossier.verification.verifiedShare * 100)}% verified, ${dossier.qa.unknown} unknown${dossier.score?.vetoes.length ? `, vetoes: ${dossier.score.vetoes.map((item) => item.veto).join(", ")}` : ""}`,
+        [{ type: "dossier", id: dossier.id }, ...links], null);
+      return ok({
+        status: dossier.status, version: dossier.version, score: dossier.score,
+        verification: { verifiedShare: dossier.verification.verifiedShare, failedClaims: dossier.verification.claims.filter((claim) => claim.verdict !== "verified"), criticalFailures: dossier.verification.criticalFailures, structural: dossier.verification.structural },
+        qa: dossier.qa,
+      });
+    },
+  }),
+  spec({
+    name: "cofactory_dossiers",
+    description: "Every niche past discovery with its newest dossier: status, score, vetoes and champion. Also lists selected niches that still need a dossier.",
+    roles: ["scout", "lead"],
+    input: z.object({}),
+    run(_args, { dossiers }) {
+      if (!dossiers) return refused("dossiers are not running");
+      return ok({ niches: dossiers.board(), stillNeedDossier: dossiers.wanted() });
+    },
+  }),
+  spec({
+    name: "cofactory_champion",
+    description: "Champion a clean dossier the score left off the shortlist, so it goes on to a cheap validation test. Say specifically what the score misses and cite at least one verified signal id or claim check id. Vetoed or unverified dossiers cannot be championed.",
+    roles: ["scout", "lead"],
+    input: z.object({ dossier_id: z.string().min(1), why: z.string().min(1).max(2_000), evidence: z.array(z.string()).min(1).max(10) }),
+    run(args, ctx) {
+      if (!ctx.dossiers) return refused("dossiers are not running");
+      const result = ctx.dossiers.champion(args.dossier_id, ctx.actor, args.why, args.evidence);
+      decide(ctx, "dossier.champion", result.ok ? "allowed" : "refused", result.ok ? args.why.slice(0, 200) : result.reason, [{ type: "dossier", id: args.dossier_id }], null);
+      return result.ok ? ok({ dossier: { id: result.dossier.id, status: result.dossier.status, champion: result.dossier.champion } }) : refused(result.reason);
     },
   }),
   spec({

@@ -16,6 +16,7 @@ import type { Sessions } from "../cofactory/runtime/sessions.ts";
 import type { RuntimeStore } from "../cofactory/runtime/store.ts";
 import type { Truth } from "../cofactory/truth/store.ts";
 import type { Discovery } from "../cofactory/discovery/discovery.ts";
+import type { Dossiers } from "../cofactory/dossier/dossiers.ts";
 import { PROFILE_FIELDS } from "../../shared/cofactory/discovery.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
@@ -34,6 +35,7 @@ export interface CofactoryRouteDeps {
   runtime: () => { store: RuntimeStore; sessions: Sessions; launcher: Launcher | undefined } | null;
   observe: () => Observer;
   discovery: () => Discovery;
+  dossiers: () => Dossiers;
   traceDeps: () => TraceDeps;
   tick: () => Promise<void>;
   owner: (auth: RequestAuth) => boolean;
@@ -117,6 +119,11 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
           niches: discovery.store.niches(status ? { batchId: status.batch.id } : {}), signals: discovery.store.signals(status ? { batchId: status.batch.id } : {}),
         });
       }
+      if (path === "/api/cofactory/dossiers") return json(res, 200, { niches: deps.dossiers().board(), stillNeedDossier: deps.dossiers().wanted() });
+      if (path.startsWith("/api/cofactory/dossiers/")) {
+        const dossier = deps.discovery().store.dossier(path.slice("/api/cofactory/dossiers/".length));
+        return dossier ? json(res, 200, { dossier }) : json(res, 404, { error: "no such dossier" });
+      }
       if (path === "/api/cofactory/ledger") return json(res, 200, { entries: book.entries(companyParam ? { companyId: companyParam } : {}) });
       if (path === "/api/cofactory/events") return json(res, 200, { events: deps.evidence().events(companyParam ? { companyId: companyParam } : {}) });
       return PASS;
@@ -158,7 +165,27 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
     if (path === "/api/cofactory/discovery/close") {
       const result = deps.discovery().closeBatch();
       record(null, "discovery_close", result.ok ? "closed" : result.reason);
+      if (!result.ok) return answer(result);
+      const selected = deps.dossiers().select(result.status.batch.id);
+      for (const id of selected) observe.decide({ companyId: null, session: null, actor: "owner", kind: "niche.select", verdict: "allowed", reason: "selected for a dossier from the closed batch", evidence: [{ type: "niche", id }] });
+      void deps.tick();
+      return json(res, 200, { ...result, selectedForDossiers: selected });
+    }
+    if (path === "/api/cofactory/discovery/abandon") {
+      const result = deps.discovery().abandonBatch();
+      record(null, "discovery_abandon", result.ok ? `abandoned short: ${result.status.short.join("; ")}` : result.reason);
       return answer(result);
+    }
+    if (path === "/api/cofactory/dossiers/select") {
+      const input = parse(z.object({ batchId: z.string().optional(), nicheIds: z.array(z.string()).max(50).optional() }));
+      if (!input) return;
+      const dossiers = deps.dossiers();
+      const lastClosed = deps.discovery().store.batches().filter((batch) => batch.closedAt !== null).at(-1);
+      const selected = input.nicheIds ? dossiers.selectNiches(input.nicheIds) : dossiers.select(input.batchId ?? lastClosed?.id ?? "");
+      for (const id of selected) observe.decide({ companyId: null, session: null, actor: "owner", kind: "niche.select", verdict: "allowed", reason: "selected for a dossier by the owner", evidence: [{ type: "niche", id }] });
+      record(null, "select_dossiers", `${selected.length} niches`);
+      if (selected.length) void deps.tick();
+      return json(res, 200, { ok: true, selected });
     }
     if (path === "/api/cofactory/factory/staff") {
       if (!runtime?.launcher) return json(res, 503, { error: "the runtime is not running" });

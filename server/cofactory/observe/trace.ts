@@ -25,11 +25,12 @@ export function resolveEvidence(deps: Pick<TraceDeps, "book" | "truth" | "runtim
     case "session": return deps.runtime?.session(link.id) ?? null;
     case "signal": return deps.discovery?.signal(link.id) ?? null;
     case "niche": return deps.discovery?.niche(link.id) ?? null;
+    case "dossier": return deps.discovery?.dossier(link.id) ?? null;
   }
 }
 
 /** Stage moves and money that need a record behind them when allowed. */
-const NEEDS_EVIDENCE = new Set(["stage.advance", "spend.authorize", "spend.capture", "company.launch", "company.kill", "company.top_up", "revenue.record", "signal.record", "niche.propose"]);
+const NEEDS_EVIDENCE = new Set(["stage.advance", "spend.authorize", "spend.capture", "company.launch", "company.kill", "company.top_up", "revenue.record", "signal.record", "niche.propose", "niche.select", "dossier.submit", "dossier.champion"]);
 
 /**
  * Whether a decision can be traced: its cost snapshot is present, and every link resolves. An allowed decision of a

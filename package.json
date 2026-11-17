@@ -40,6 +40,7 @@
     "test-bots": "node scripts/demo/test-bots.mjs",
     "cofactory:eval": "node --experimental-strip-types scripts/cofactory-eval.ts",
     "cofactory:board": "node --experimental-strip-types scripts/cofactory-board.ts",
+    "cofactory:rediscovery": "node --experimental-strip-types scripts/cofactory-rediscovery.ts",
     "mcp": "node --experimental-strip-types scripts/mcp-server.ts",
     "control:dusk": "node --experimental-strip-types scripts/control-dusk.ts",
     "ui:baseline": "node --experimental-strip-types scripts/testing/visual-baseline.ts",
