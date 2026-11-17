@@ -24,8 +24,8 @@ async function crossfade(win, splash) {
 const W = 480, H = 300;
 const resource = name => fileURLToPath(new URL(`./resources/${name}`, import.meta.url));
 const font = `data:font/woff2;base64,${readFileSync(resource("general-sans.woff2")).toString("base64")}`;
-/** The five mascots' pixel bodies on their 16 grid, one eye shape per pose. */
-const SPRITES = JSON.parse(readFileSync(resource("startup-crew.json"), "utf8"));
+/** The five crew characters (scripts/make-cofactory-icons.mjs): an SVG per pose and a silhouette for the empty spot. */
+const CHARACTERS = JSON.parse(readFileSync(resource("startup-characters.json"), "utf8"));
 
 export const THEMES = Object.freeze({
   light: Object.freeze({ bg: "#fafbfc", ink: "#1b1b1f", soft: "#5d5f68", track: "#1b1b1f12", ghost: "#1b1b1f0f", shadow: "#1b1b1f14", hover: "#1b1b1f0f", kitEyes: "#ffffff" }),
@@ -34,16 +34,15 @@ export const THEMES = Object.freeze({
 
 /** What each launch milestone (a startup trace mark) tells the person, in order. The first shows as the card opens. */
 export const STEPS = Object.freeze([
-  ["opening", "Opening dusk bot"],
+  ["opening", "Opening Cofactory"],
   ["credentials", "Unlocking your sign-ins"],
   ["server", "Starting your bots"],
   ["window", "Opening your workspace"],
   ["loaded", "Almost there"],
 ]);
 
-/** One mascot turns up per step, in this order; kit is drawn in ink so it follows the theme. */
-export const CREW = Object.freeze(["goo", "kit", "pip", "mochi", "boxo"]);
-const CREW_COLORS = { goo: "#f75e51", pip: "#286ef9", mochi: "#f12b93", boxo: "#fb7c01" };
+/** One of the factory's crew turns up per step, in this order, each in its role's signature look. */
+export const CREW = Object.freeze(["scout", "lead", "ceo", "builder", "marketer"]);
 
 /** How long the crew cheers once the app is ready, before the app fades in over them. */
 export const CHEER_MS = 520;
@@ -109,8 +108,8 @@ export function startupDark({ systemDark, saved }) {
 
 export function startupScreenHtml({ dark = false, expectedMs = PACE.firstRunMs } = {}) {
   const t = dark ? THEMES.dark : THEMES.light;
-  const crew = CREW.map(name => ({ name, color: CREW_COLORS[name] ?? t.ink, eyeColor: CREW_COLORS[name] ? "#ffffff" : t.kitEyes, ...SPRITES[name] }));
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="${dark ? "dark" : "light"}"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'"><title>dusk bot</title><style>
+  const crew = CREW.map(name => ({ name, ...CHARACTERS[name] }));
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="${dark ? "dark" : "light"}"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src data:; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'"><title>Cofactory</title><style>
   @font-face{font-family:"General Sans";src:url("${font}") format("woff2");font-weight:200 700}
   :root{--bg:${t.bg};--ink:${t.ink};--soft:${t.soft};--track:${t.track};--hover:${t.hover};--ease-out:cubic-bezier(.23,1,.32,1)}
   *{box-sizing:border-box}
@@ -142,11 +141,11 @@ export function startupScreenHtml({ dark = false, expectedMs = PACE.firstRunMs }
   @media(prefers-reduced-motion:reduce){.scene,.txt{transition:none}}
   </style></head><body>
   <canvas class="scene" width="${W}" height="${H}" aria-hidden="true"></canvas>
-  <p class="brand">dusk bot</p>
+  <p class="brand">Cofactory</p>
   <button class="close" aria-label="Close" data-act="close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
   <main class="txt">
   <p class="line" role="status">${STEPS[0][1]}</p>
-  <div class="meta" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-valuetext="0 of ${CREW.length} here" aria-label="Opening dusk bot"><b class="here">0 of ${CREW.length}</b> here<span class="pct">0%</span></div>
+  <div class="meta" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-valuetext="0 of ${CREW.length} here" aria-label="Opening Cofactory"><b class="here">0 of ${CREW.length}</b> here<span class="pct">0%</span></div>
   <p class="detail"></p>
   <div class="actions"><button class="go" data-act="retry">Try again</button><button class="stop" data-act="quit">Quit</button></div>
   </main><script>${pageScript({ crew, ghost: t.ghost, shadow: t.shadow, track: t.track, expectedMs })}</script></body></html>`;
@@ -166,18 +165,16 @@ const pageScript = ({ crew, ghost, shadow, track, expectedMs }) => `(() => {
   const still = matchMedia('(prefers-reduced-motion: reduce)');
   const canvas = document.querySelector('.scene'), dpr = Math.max(1, Math.round(devicePixelRatio || 1));
   canvas.width = W * dpr; canvas.height = H * dpr;
-  const g = canvas.getContext('2d'); g.scale(dpr, dpr); g.imageSmoothingEnabled = false;
-  const cells = d => { const out = []; for (const m of d.matchAll(/M(\\d+) (\\d+)h(\\d+)v1/g)) for (let i = 0; i < +m[3]; i++) out.push([+m[1] + i, +m[2]]); return out; };
+  const g = canvas.getContext('2d'); g.scale(dpr, dpr); g.imageSmoothingEnabled = true;
   const sprites = new Map();
-  // each pose is painted once into a 16px tile, then scaled up crisp
+  // each pose is one SVG image, decoded once; the empty spot is the character's silhouette in the ghost colour
   const tile = (m, pose, fill) => {
-    const key = m.name + pose + fill;
+    const key = m.name + (pose || 'ghost') + fill;
     if (sprites.has(key)) return sprites.get(key);
-    const c = document.createElement('canvas'); c.width = c.height = 16;
-    const x = c.getContext('2d');
-    x.fillStyle = fill; for (const [cx, cy] of cells(m.body)) x.fillRect(cx, cy, 1, 1);
-    if (pose) { x.fillStyle = m.eyeColor; for (const [cx, cy] of cells(m.eyes[pose] ?? m.eyes.idle)) x.fillRect(cx, cy, 1, 1); }
-    sprites.set(key, c); return c;
+    const image = new Image();
+    const source = pose ? (m.svg[pose] || m.svg.idle) : m.ghost.replace(/#000000/g, fill);
+    image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(source);
+    sprites.set(key, image); return image;
   };
   const ease = v => 1 - (1 - v) ** 3, snap = v => Math.round(v / S) * S;
   const slot = k => W / 2 + (k - (CREW.length - 1) / 2) * 78 - 32;
@@ -217,7 +214,7 @@ const pageScript = ({ crew, ghost, shadow, track, expectedMs }) => `(() => {
       g.save(); g.translate(snap(x), snap(y));
       if (flip) { g.translate(64, 0); g.scale(-1, 1); }
       if (squash) { g.translate(32, 64); g.scale(1.12, .88); g.translate(-32, -64); }
-      g.drawImage(tile(m, pose, m.color), 0, 0, 64, 64);
+      g.drawImage(tile(m, pose, ''), 0, 0, 64, 64);
       g.restore();
     });
     const text = count + ' of ' + total;

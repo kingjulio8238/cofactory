@@ -16,11 +16,13 @@ const ROWS: Record<MacPermission, { art: ArtName; name: Parameters<typeof t>[0];
   notifications: { art: "bubbles", name: "funnel.permissions.notifications", why: "funnel.permissions.notificationsWhy" },
 };
 
-export function PermissionsStep({ bridge, onNext, relaunch, kinds = MAC_PERMISSIONS, copy }: {
+export function PermissionsStep({ bridge, onNext, relaunch, kinds = MAC_PERMISSIONS, copy, art }: {
   bridge: MacPermissionsBridge;
   /** the permissions offered; all three unless a run asks for fewer */
   kinds?: readonly MacPermission[];
   copy?: { title: string; sub: string };
+  /** the picture over the title, in place of the Mac and its key */
+  art?: React.ReactNode;
   /** on to the app; `granted`: how many were on when the person left */
   onNext: (how: "continue" | "later", granted: number) => void;
   /** reopens the app, for Screen Recording to take effect; absent where the app can't */
@@ -65,7 +67,7 @@ export function PermissionsStep({ bridge, onNext, relaunch, kinds = MAC_PERMISSI
         <button type="button" data-funnel-permissions-later="" onClick={() => leave("later")}
           className={cn(QUIET, "pointer-events-auto text-[12px] opacity-40 hover:opacity-70 focus-visible:opacity-100")}>{t("funnel.permissions.later")}</button>
       </div>
-      <StepFrame art={<StepArt art="mac-key" />} title={copy?.title ?? t("funnel.permissions.title")} sub={copy?.sub ?? t("funnel.permissions.sub")}
+      <StepFrame art={art ?? <StepArt art="mac-key" />} title={copy?.title ?? t("funnel.permissions.title")} sub={copy?.sub ?? t("funnel.permissions.sub")}
         footer={<button type="button" data-primary="" data-funnel-permissions-continue="" onClick={() => leave("continue")} className={PRIMARY}>{t("funnel.next")}</button>}>
         <ul className="-mt-2 flex w-full max-w-[420px] flex-col gap-1.5 text-start">
           {kinds.map((kind) => {

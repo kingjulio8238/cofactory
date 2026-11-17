@@ -1,0 +1,22 @@
+/* Agent character motion, from the agent-characters package's animations.css, renamed under cf- and with a one-shot pop
+   and blink. Inline SVG only. */
+.cf-bob { animation: cf-bob 3.2s ease-in-out infinite; }
+.cf-fast { animation-duration: 0.6s; }
+.cf-hop { animation: cf-hop 1.4s ease-in-out infinite; transform-box: fill-box; transform-origin: 50% 100%; }
+.cf-blink { animation: cf-blink 4.5s infinite; transform-box: fill-box; transform-origin: center; }
+.cf-scan { animation: cf-scan 2.6s ease-in-out infinite; }
+.cf-pop { animation: cf-pop 0.5s cubic-bezier(0.3, 1.6, 0.5, 1) 1; transform-box: fill-box; transform-origin: 50% 100%; }
+.cf-blink-now { animation: cf-blink-now 0.22s ease-in-out 1; transform-box: fill-box; transform-origin: center; }
+.cf-eye { transition: x 0.18s ease-out, y 0.18s ease-out, width 0.18s ease-out, height 0.18s ease-out; }
+
+@keyframes cf-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+@keyframes cf-hop { 0%, 55%, 100% { transform: translateY(0) rotate(0); } 25% { transform: translateY(-12px) rotate(-2deg); } }
+@keyframes cf-blink { 0%, 93%, 100% { transform: scaleY(1); } 96% { transform: scaleY(0.1); } }
+@keyframes cf-scan { 0%, 100% { transform: translateX(-4px); } 50% { transform: translateX(4px); } }
+@keyframes cf-pop { 0% { transform: translateY(0) scale(1); } 40% { transform: translateY(-14px) scale(1.04, 0.97); } 100% { transform: translateY(0) scale(1); } }
+@keyframes cf-blink-now { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(0.1); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .cf-bob, .cf-hop, .cf-blink, .cf-scan, .cf-pop, .cf-blink-now { animation: none; }
+  .cf-eye { transition: none; }
+}

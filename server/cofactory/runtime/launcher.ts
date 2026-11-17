@@ -5,6 +5,23 @@ import type { DiscoveryStore } from "../discovery/store.ts";
 import type { NicheRegistry } from "../discovery/registry.ts";
 import type { Dossier } from "../../../shared/cofactory/dossier.ts";
 
+/** How a seat's bot looks: a dusk colour and body, which the app draws as that role's character. */
+export interface SeatLook {
+  color: "blue" | "red" | "purple" | "green" | "pink" | "yellow" | "silver";
+  body: "drip" | "sprout" | "bruin" | "boxo" | "boo" | "hop" | "hoot";
+}
+
+/** Each role's signature character: the lead a tall tower, the scout a sprout with its antenna up, and so on. */
+export const ROLE_LOOKS: Record<CompanyRole | FactoryRole, SeatLook> = {
+  lead: { color: "blue", body: "drip" },
+  scout: { color: "red", body: "sprout" },
+  ceo: { color: "purple", body: "bruin" },
+  builder: { color: "green", body: "boxo" },
+  marketer: { color: "pink", body: "boo" },
+  seller: { color: "yellow", body: "hop" },
+  operator: { color: "silver", body: "hoot" },
+};
+
 export interface PlaybookSeat {
   role: CompanyRole;
   /** Standing instructions for the seat; `{company}` and `{brief}` are filled in at launch. */
@@ -83,7 +100,7 @@ export interface LauncherDeps {
   book: Book;
   workspaces: Workspaces;
   /** Creates a dusk bot that acts on its own (Full access) and returns its id. */
-  createBot(profile: { name: string; instructions: string; section: string }): Promise<string>;
+  createBot(profile: { name: string; instructions: string; section: string; look?: SeatLook }): Promise<string>;
   /** Where shortlisted niches and their dossiers live, so a company can be launched from one. */
   discovery?: { store: DiscoveryStore; registry: NicheRegistry };
 }
@@ -113,7 +130,7 @@ export function createLauncher(deps: LauncherDeps) {
       for (const seat of FACTORY_SEATS) {
         const existing = deps.book.members().find((member) => member.companyId === null && member.role === seat.role);
         if (existing) { staffed.push({ role: seat.role, botId: existing.botId, created: false }); continue; }
-        const botId = await deps.createBot({ name: seat.name, instructions: seat.instructions, section: "Cofactory · Factory" });
+        const botId = await deps.createBot({ name: seat.name, instructions: seat.instructions, section: "Cofactory · Factory", look: ROLE_LOOKS[seat.role] });
         deps.book.seat({ botId, role: seat.role, companyId: null });
         staffed.push({ role: seat.role, botId, created: true });
       }
@@ -143,7 +160,7 @@ export function createLauncher(deps: LauncherDeps) {
       await deps.workspaces.ensure(company.id, fill(playbook.brief, company));
       const team: Array<{ role: CompanyRole; botId: string }> = [];
       for (const seat of playbook.seats) {
-        const botId = await deps.createBot({ name: `${company.name} · ${ROLE_NAMES[seat.role]}`, instructions: fill(seat.instructions, company), section: `Cofactory · ${company.name}` });
+        const botId = await deps.createBot({ name: `${company.name} · ${ROLE_NAMES[seat.role]}`, instructions: fill(seat.instructions, company), section: `Cofactory · ${company.name}`, look: ROLE_LOOKS[seat.role] });
         const seated = deps.book.seat({ botId, role: seat.role, companyId: company.id });
         if (!seated.ok) return seated;
         team.push({ role: seat.role, botId });

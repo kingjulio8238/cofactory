@@ -25,6 +25,7 @@ import { funnelAccount, type FunnelAccountState } from "./funnel-account";
 import { FunnelBar, PhoneStep, PlaceStep, WelcomeStep } from "./FunnelSteps";
 import { ApprovalsStep, HunchStep, OpeningStep, StakeStep, WhereStep, type Approvals } from "./FactorySteps";
 import { MakingStep } from "./MakingStep";
+import { CrewArt } from "./CrewArt";
 import { PermissionsStep } from "./PermissionsStep";
 import { useWelcomeAi } from "./welcome-ai";
 import { localDesktopPage } from "./WelcomeGate";
@@ -310,7 +311,8 @@ export function WelcomeFlow({
   let body: ReactNode;
   switch (at) {
     case "welcome":
-      body = <WelcomeStep onStart={next} copy={factory ? FACTORY_COPY.welcome : undefined} cloud={cloudHome ? { name: greetingName(state.config?.profile?.name), picture: state.config?.profile?.avatarUrl || undefined } : undefined} />;
+      body = <WelcomeStep onStart={next} copy={factory ? FACTORY_COPY.welcome : undefined}
+        art={factory ? <CrewArt crew={[{ role: "scout" }, { role: "lead" }, { role: "ceo", state: "done" }, { role: "builder" }, { role: "marketer" }]} size={60} /> : undefined} cloud={cloudHome ? { name: greetingName(state.config?.profile?.name), picture: state.config?.profile?.avatarUrl || undefined } : undefined} />;
       break;
     case "account":
       body = account ? <AccountStep account={account} known={known}
@@ -350,7 +352,7 @@ export function WelcomeFlow({
       break;
     }
     case "notify":
-      body = macAccess ? <PermissionsStep bridge={macAccess} kinds={["notifications"]} copy={FACTORY_COPY.notify}
+      body = macAccess ? <PermissionsStep bridge={macAccess} kinds={["notifications"]} copy={FACTORY_COPY.notify} art={<CrewArt crew={[{ role: "marketer", state: "needs" }]} />}
         onNext={(how, granted) => { track("onboarding_permissions", { action: how, granted }); next(); }} /> : null;
       break;
     case "opening":

@@ -6,15 +6,14 @@ import { ARRIVE_AT, CREW, PACE, STEPS, crewArrivals, expectedLoadMs, progressAt,
 
 test("the splash is the crew on their line, one empty spot per step, in the theme it was asked for", () => {
   const light = startupScreenHtml(), dark = startupScreenHtml({ dark: true });
-  assert.deepEqual(CREW, ["goo", "kit", "pip", "mochi", "boxo"]);
+  assert.deepEqual(CREW, ["scout", "lead", "ceo", "builder", "marketer"]);
   assert.equal(CREW.length, STEPS.length, "one mascot per startup step");
   assert.match(light, /<canvas class="scene" width="480" height="300" aria-hidden="true">/);
-  assert.match(light, /<p class="brand">dusk bot<\/p>/);
-  assert.match(light, /role="status">Opening dusk bot</);
-  assert.match(light, /role="progressbar" aria-valuenow="0"[^>]*aria-valuetext="0 of 5 here" aria-label="Opening dusk bot"><b class="here">0 of 5<\/b> here/);
-  assert.match(light, /"name":"kit","color":"#1b1b1f","eyeColor":"#ffffff"/, "kit in ink on light");
-  assert.match(dark, /"name":"kit","color":"#f2f3f5","eyeColor":"#1b1b1f"/);
-  assert.match(light, /"name":"goo","color":"#f75e51"/);
+  assert.match(light, /<p class="brand">Cofactory<\/p>/);
+  assert.match(light, /role="status">Opening Cofactory</);
+  assert.match(light, /role="progressbar" aria-valuenow="0"[^>]*aria-valuetext="0 of 5 here" aria-label="Opening Cofactory"><b class="here">0 of 5<\/b> here/);
+  assert.match(light, /"name":"scout","svg":\{"idle":"<svg /, "each crew member is a character image");
+  assert.match(light, /img-src data:;/);
   assert.match(light, /--bg:#fafbfc;/); assert.match(light, /content="light"/);
   assert.match(dark, /--bg:#141418;/); assert.match(dark, /content="dark"/);
   assert.doesNotMatch(light, /prefers-color-scheme/);
@@ -28,11 +27,11 @@ test("the splash is the crew on their line, one empty spot per step, in the them
   assert.doesNotMatch(light, /\u2014|border:\s*1px|transition:all/);
 });
 
-test("every mascot has the poses the screen draws: idle, arriving, cheering, stuck and worried", () => {
-  const sprites = JSON.parse(readFileSync(new URL("./resources/startup-crew.json", import.meta.url), "utf8"));
+test("every crew character has the poses the screen draws: idle, arriving, cheering, stuck and worried, and a silhouette", () => {
+  const characters = JSON.parse(readFileSync(new URL("./resources/startup-characters.json", import.meta.url), "utf8"));
   for (const name of CREW) {
-    assert.match(sprites[name].body, /^(M\d+ \d+h\d+v1h-\d+z)+$/, name);
-    for (const pose of ["idle", "working", "happy", "thinking"]) assert.match(sprites[name].eyes[pose], /^(M\d+ \d+h\d+v1h-\d+z)+$/, `${name} ${pose}`);
+    for (const pose of ["idle", "working", "happy", "thinking"]) assert.match(characters[name].svg[pose], /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/, `${name} ${pose}`);
+    assert.match(characters[name].ghost, /fill="#000000"/, `${name} silhouette`);
   }
 });
 

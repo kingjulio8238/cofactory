@@ -141,11 +141,11 @@ export function ImproveSwitch() {
 }
 
 /** The hello. On a cloud the desktop app set up it greets the person by the name and picture that computer knows. */
-export function WelcomeStep({ onStart, cloud, copy }: { onStart: () => void; cloud?: { name: string; picture?: string }; copy?: { title: string; sub: string } }) {
+export function WelcomeStep({ onStart, cloud, copy, art: artOverride }: { onStart: () => void; cloud?: { name: string; picture?: string }; copy?: { title: string; sub: string }; art?: ReactNode }) {
   const reduced = usePrefersReducedMotion();
-  const art = cloud?.picture
+  const art = artOverride ?? (cloud?.picture
     ? <img src={cloud.picture} alt="" data-welcome-picture="" className="size-[72px] rounded-full object-cover" />
-    : <MausAvatar color="purple" gradient={BRAND_LILAC} size={72} state="excited" animated={!reduced} label={productName()} />;
+    : <MausAvatar color="purple" gradient={BRAND_LILAC} size={72} state="excited" animated={!reduced} label={productName()} />);
   return (
     <div className="flex min-h-full w-full flex-col">
       <StepFrame

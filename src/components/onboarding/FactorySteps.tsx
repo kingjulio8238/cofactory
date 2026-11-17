@@ -8,7 +8,8 @@ import { friendlyError } from "@/lib/plain-error";
 import { api } from "@/state/store";
 import { MausAvatar } from "../Avatar";
 import { Toggle } from "../ui/Toggle";
-import { PRIMARY, QUIET, SECONDARY, StepArt, StepFrame, TILE } from "./FunnelSteps";
+import { PRIMARY, QUIET, SECONDARY, StepFrame, TILE } from "./FunnelSteps";
+import { CrewArt } from "./CrewArt";
 
 const MIN_STAKE_CENTS = 2_500;
 const dollars = (cents: number) => `$${Math.round(cents / 100).toLocaleString("en-US")}`;
@@ -81,7 +82,7 @@ export function WhereStep({ country, region, onNext }: { country: string | null;
     }
   };
   return (
-    <StepFrame art={<StepArt art="map" />} title="Where are you based?"
+    <StepFrame art={<CrewArt crew={[{ role: "scout", state: "thinking" }]} />} title="Where are you based?"
       sub="Your companies are yours, so they follow your country's rules for contacting people, taking payments and tax."
       footer={<>
         <ErrorLine text={error} />
@@ -120,7 +121,7 @@ export function HunchStep({ hunches, never, onNext }: { hunches: string[]; never
     }
   };
   return (
-    <StepFrame art={<StepArt art="binoculars" />} title="Anything in mind?"
+    <StepFrame art={<CrewArt crew={[{ role: "scout", state: "thinking" }, { role: "lead" }]} />} title="Anything in mind?"
       sub="Your scout finds niches on its own. If you want it to look somewhere first, or never go somewhere, say so. Most people skip this."
       footer={<>
         <ErrorLine text={error} />
@@ -193,7 +194,7 @@ export function StakeStep({ budgetCents, capCents, allocation, closeAfterDays, o
     </button>
   );
   return (
-    <StepFrame art={<StepArt art="coins" />} title="Fund your factory" wide
+    <StepFrame art={<CrewArt crew={[{ role: "ceo", state: "done" }, { role: "builder" }, { role: "marketer" }]} size={56} />} title="Fund your factory" wide
       sub="What it can spend this month on real things like domains, ads and payment fees. AI use runs on your own plan."
       footer={<>
         <ErrorLine text={error} />
@@ -272,7 +273,7 @@ export function ApprovalsStep({ approvals, emails, onNext }: { approvals: Approv
     }
   };
   return (
-    <StepFrame art={<StepArt art="shield" />} title="What needs your OK"
+    <StepFrame art={<CrewArt crew={[{ role: "lead", state: "needs" }]} />} title="What needs your OK"
       sub="Your factory works on its own, except where you say so. You can change these any time."
       footer={<>
         <ErrorLine text={error} />
@@ -321,7 +322,7 @@ export function OpeningStep({ onDone }: { onDone: (botId: string | null) => void
     const timer = setTimeout(() => setHere((count) => count + 1), reduced ? 0 : 450);
     return () => clearTimeout(timer);
   }, [state.kind, here, reduced]);
-  const crew = [{ name: "Factory Lead", color: "blue" as const }, { name: "Factory Scout", color: "red" as const }];
+  const crew = [{ name: "Factory Lead", color: "blue" as const, body: "drip" as const }, { name: "Factory Scout", color: "red" as const, body: "sprout" as const }];
   const done = state.kind === "open" && here >= 2;
   return (
     <StepFrame
@@ -330,7 +331,7 @@ export function OpeningStep({ onDone }: { onDone: (botId: string | null) => void
           {crew.map((member, index) => (
             <motion.span key={member.name} initial={{ opacity: 0, y: 14 }} animate={index < here ? { opacity: 1, y: 0 } : { opacity: 0.12, y: 0 }}
               transition={{ type: "spring", stiffness: 320, damping: 20 }}>
-              <MausAvatar color={member.color} size={56} state={index < here ? "happy" : "idle"} animated={!reduced} trackPointer={false} label={member.name} />
+              <MausAvatar color={member.color} bodyId={member.body} size={64} state={index < here ? "happy" : "idle"} animated={!reduced} label={member.name} />
             </motion.span>
           ))}
           <span aria-hidden="true" className="absolute inset-x-[-24px] bottom-[-6px] h-1 rounded-full bg-ink/[0.07]" />

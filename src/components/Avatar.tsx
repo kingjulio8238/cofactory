@@ -15,6 +15,9 @@ import { hoverGaze, type MarkReaction } from "./mascot-engine";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, mascotFaceInk, type BotAvatarCrop, type MascotFaceColor } from "../../shared/bot-avatar";
 import { bodyShapeFor, type StoredBodyId } from "../../shared/bot-body";
 import { useHalloweenDressed, wornBody } from "@/lib/halloween-dress";
+import { cofactoryEnabled } from "@/lib/feature-flags";
+import { characterBase, characterState, SHELL_FOR_COLOR } from "@/lib/character-identity";
+import { Character, type CharacterHandle } from "./Character";
 
 export const EYE_SCALE = 1.12;
 export const MOUTH_WEIGHT = 11;
@@ -111,12 +114,13 @@ function MausAvatarComponent(
 ) {
   const faceInk = mascotFaceInk(faceColor);
   const inner = useRef<DuskMarkHandle>(null);
+  const character = useRef<CharacterHandle>(null);
   useImperativeHandle(ref, () => ({
-    blink: () => inner.current?.blink(),
-    spin: (durationMs?: number) => inner.current?.spin(durationMs),
+    blink: () => (character.current ? character.current.blink() : inner.current?.blink()),
+    spin: (durationMs?: number) => (character.current ? character.current.pop() : inner.current?.spin(durationMs)),
     setExpression: (index: number) => inner.current?.setExpression(index),
-    poke: (kind) => inner.current?.poke(kind),
-    react: (kind) => inner.current?.react(kind),
+    poke: (kind) => (character.current ? character.current.pop() : inner.current?.poke(kind)),
+    react: (kind) => (character.current ? character.current.pop() : inner.current?.react(kind)),
   }));
 
   const [motionState, setMotionState] = useState<MausState | null>(null);
@@ -142,6 +146,14 @@ function MausAvatarComponent(
   };
   const onPointerLeave = () => setPointer(null);
   const look = pointer ?? (gaze ? { x: gaze.x ?? 0, y: gaze.y ?? 0 } : null);
+
+  // Cofactory's own characters in place of dusk's pixel marks: the bot's colour is its shell, its body its shape
+  if (cofactoryEnabled()) {
+    return (
+      <Character ref={character} base={characterBase(bodyId, cueKey)} shell={SHELL_FOR_COLOR[color] ?? SHELL_FOR_COLOR.chrome}
+        state={characterState(motionState ?? state)} size={size} animated={animated} trackPointer={trackPointer} label={label ?? ""} />
+    );
+  }
 
   return (
     <span
@@ -217,7 +229,7 @@ export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotPr
   if (outcome !== "flatImage") {
     return (
       <MausAvatar
-        bodyId={wornBody(bot.mascotBody, bot.color, dressed)}
+        bodyId={cofactoryEnabled() && !bot.mascotBody ? undefined : wornBody(bot.mascotBody, bot.color, dressed)}
         {...mascotProps}
         color={bot.color}
         faceColor={bot.mascotFaceColor}

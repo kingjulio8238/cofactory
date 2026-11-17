@@ -7,6 +7,7 @@ import type { Sessions } from "../runtime/sessions.ts";
 import type { RuntimeStore } from "../runtime/store.ts";
 import type { Truth } from "../truth/store.ts";
 import type { Order, Orders, Rehearsal } from "./orders.ts";
+import { ROLE_LOOKS, type SeatLook } from "../runtime/launcher.ts";
 
 const DAY = 24 * 60 * 60_000;
 /** Days an order may stay open before the CEO is alarmed. */
@@ -28,7 +29,7 @@ export interface RehearsalDeps {
   observe: Observer;
   folderOf(companyId: string): string;
   packetRoot: string;
-  createBot(profile: { name: string; instructions: string; section: string }): Promise<string>;
+  createBot(profile: { name: string; instructions: string; section: string; look?: SeatLook }): Promise<string>;
   now?: () => number;
 }
 
@@ -65,7 +66,7 @@ export function createRehearsals(deps: RehearsalDeps) {
     mkdirSync(dir, { recursive: true });
     for (const name of PACKET_FILES) if (existsSync(join(folder, name))) copyFileSync(join(folder, name), join(dir, name));
     writeFileSync(join(dir, "ORDER.md"), orderSheet(order, deps.truth));
-    const botId = await deps.createBot({ name: `${company.name} · Stand-in`, instructions: STAND_IN_INSTRUCTIONS.replaceAll("{company}", company.name), section: `Cofactory · ${company.name}` });
+    const botId = await deps.createBot({ name: `${company.name} · Stand-in`, instructions: STAND_IN_INSTRUCTIONS.replaceAll("{company}", company.name), section: `Cofactory · ${company.name}`, look: ROLE_LOOKS.operator });
     const seated = book.seat({ botId, role: "operator", companyId: company.id });
     if (!seated.ok) return null;
     const rehearsal = orders.startRehearsal({ companyId: company.id, orderId: order.id, botId, dir });
