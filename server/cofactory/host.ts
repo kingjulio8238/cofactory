@@ -30,6 +30,7 @@ import { openRails, type Rails } from "./validation/rails.ts";
 import { openSprints, type Sprints } from "./validation/sprints.ts";
 import { openOrders, type Orders } from "./validation/orders.ts";
 import { createRehearsals } from "./validation/rehearsal.ts";
+import { openSettings } from "./settings.ts";
 import { armsLength } from "./truth/classify.ts";
 import { writeFileAtomic } from "../atomic.ts";
 
@@ -138,6 +139,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     offerPage: (companyId) => (/^[\w-]+$/.test(companyId) && existsSync(offerFile(companyId)) ? readFileSync(offerFile(companyId), "utf8") : null),
   });
 
+  const settings = openSettings(join(deps.dataDir, "cofactory-settings.json"));
   const relatedFile = join(deps.dataDir, "cofactory-related.json");
   /** The owner's own addresses and domains, and those of anyone related: payments from them never count as customers. */
   const relatedParties = (): { emails: string[]; domains: string[] } => {
@@ -269,6 +271,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     dossiers: dossierService,
     validation: validationParts,
     intakeDoor,
+    settings,
     relatedParties,
     setRelatedParties(value: { emails: string[]; domains: string[] }): void {
       writeFileAtomic(relatedFile, JSON.stringify(value), { mode: 0o600 });
@@ -330,7 +333,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       const params = (request.params && typeof request.params === "object" ? request.params : {}) as { name?: unknown; arguments?: unknown };
       const parts = runtimeParts();
       const result = await runTool({
-        book: books(), truth: evidence(), seat, actor: `${seat.role}:${ctx.botName}`, observe: observe(), discovery: discoveryService(), dossiers: dossierService(), validation: validationParts(),
+        book: books(), truth: evidence(), seat, actor: `${seat.role}:${ctx.botName}`, observe: observe(), discovery: discoveryService(), dossiers: dossierService(), validation: validationParts(), settings: settings.get,
         session: parts?.store.liveFor(seat.botId) ?? null,
         ...(parts ? { sessions: parts.sessions } : {}), ...(parts?.launcher ? { launcher: parts.launcher } : {}),
       }, params.name, params.arguments);

@@ -141,7 +141,7 @@ export function ImproveSwitch() {
 }
 
 /** The hello. On a cloud the desktop app set up it greets the person by the name and picture that computer knows. */
-export function WelcomeStep({ onStart, cloud }: { onStart: () => void; cloud?: { name: string; picture?: string } }) {
+export function WelcomeStep({ onStart, cloud, copy }: { onStart: () => void; cloud?: { name: string; picture?: string }; copy?: { title: string; sub: string } }) {
   const reduced = usePrefersReducedMotion();
   const art = cloud?.picture
     ? <img src={cloud.picture} alt="" data-welcome-picture="" className="size-[72px] rounded-full object-cover" />
@@ -150,8 +150,8 @@ export function WelcomeStep({ onStart, cloud }: { onStart: () => void; cloud?: {
     <div className="flex min-h-full w-full flex-col">
       <StepFrame
         art={art}
-        title={cloud ? (cloud.name ? t("funnel.welcome.cloudNamed", { name: cloud.name }) : t("funnel.welcome.cloud")) : t("funnel.welcome.title")}
-        sub={cloud ? t("funnel.welcome.cloudSub") : t("funnel.welcome.sub")}
+        title={copy?.title ?? (cloud ? (cloud.name ? t("funnel.welcome.cloudNamed", { name: cloud.name }) : t("funnel.welcome.cloud")) : t("funnel.welcome.title"))}
+        sub={copy?.sub ?? (cloud ? t("funnel.welcome.cloudSub") : t("funnel.welcome.sub"))}
         footer={<button type="button" data-primary="" data-funnel-start="" autoFocus onClick={onStart} className={PRIMARY}>{t("funnel.welcome.start")}</button>}
       />
     </div>
@@ -174,8 +174,9 @@ function PlaceChoice({ kind, art, title, sub, tag, note, onClick }: { kind: stri
 
 /** The desktop app's first screen: dusk bot says hello and asks the one question that shapes the rest, where the bots
  * live. dusk cloud's tile says its trial and price before anything is asked for. */
-export function PlaceStep({ onMac, onCloud, onServer, cloudTag, cloudNote }: {
+export function PlaceStep({ onMac, onCloud, onServer, cloudTag, cloudNote, copy }: {
   onMac: () => void; onCloud: () => void; onServer: () => void;
+  copy?: { title: string; sub: string };
   /** "7 days free" or "From $15/month" once the offer is known */
   cloudTag?: string | null;
   /** the price after the trial, in full */
@@ -183,7 +184,7 @@ export function PlaceStep({ onMac, onCloud, onServer, cloudTag, cloudNote }: {
 }) {
   const reduced = usePrefersReducedMotion();
   return (
-    <StepFrame title={t("funnel.place.title")} sub={t("funnel.place.hello")} wide
+    <StepFrame title={copy?.title ?? t("funnel.place.title")} sub={copy?.sub ?? t("funnel.place.hello")} wide
       art={<MausAvatar color="purple" gradient={BRAND_LILAC} size={64} state="excited" animated={!reduced} label={DEFAULT_BOT_NAME} />}
       footer={<>
         <button type="button" data-funnel-place="server" onClick={onServer} className={QUIET}>{t("funnel.place.server")}</button>
@@ -200,7 +201,7 @@ export function PlaceStep({ onMac, onCloud, onServer, cloudTag, cloudNote }: {
 type Pairing = { kind: "idle" } | { kind: "busy" } | { kind: "offer"; offer: MobilePairingResponse; before: string[] } | { kind: "linked"; name: string };
 
 /** The phone: one press shows a QR code (after the desktop app checks someone is here), and it says when the phone joins. */
-export function PhoneStep({ onNext }: { onNext: () => void }) {
+export function PhoneStep({ onNext, copy }: { onNext: () => void; copy?: { title: string; sub: string } }) {
   const [pairing, setPairing] = useState<Pairing>({ kind: "idle" });
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -248,10 +249,10 @@ export function PhoneStep({ onNext }: { onNext: () => void }) {
       <PhoneFrame />
       <div className="flex min-w-0 flex-1 flex-col items-center text-center sm:items-start sm:text-start">
         <h1 id="welcome-title" tabIndex={-1} className="text-balance text-[28px] font-normal leading-[34px] tracking-[-0.02em] text-ink outline-none">
-          {pairing.kind === "linked" ? t("mobile.desktop.linked", { name: pairing.name }) : t("funnel.phone.title")}
+          {pairing.kind === "linked" ? t("mobile.desktop.linked", { name: pairing.name }) : (copy?.title ?? t("funnel.phone.title"))}
         </h1>
         <p className="mt-2 max-w-[360px] text-pretty text-[15px] leading-[22px] text-ink-secondary">
-          {pairing.kind === "linked" ? t("mobile.desktop.linkedHint") : showing ? t("funnel.phone.scan") : t("funnel.phone.sub")}
+          {pairing.kind === "linked" ? t("mobile.desktop.linkedHint") : showing ? t("funnel.phone.scan") : (copy?.sub ?? t("funnel.phone.sub"))}
         </p>
         {showing && (
           <div data-phone-offer="" className="place-reveal mt-6 flex flex-col items-center gap-3 sm:items-start">

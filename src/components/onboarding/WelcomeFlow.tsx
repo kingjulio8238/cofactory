@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { setEmailGateDone, track } from "@/lib/analytics";
 import { openExternalLink } from "@/lib/app-links";
-import { phoneAppEnabled } from "@/lib/feature-flags";
+import { cofactoryEnabled, phoneAppEnabled } from "@/lib/feature-flags";
+import { draftFromProfile, emptyDraft, GROUP_ORDER, type ProfileDraft } from "@/lib/factory-profile";
 import { cn } from "@/lib/cn";
 import { chiefFor, chiefStepFits, createChiefPatch, myDefaultBot, stageIntro, useViewerEmail } from "@/lib/default-bot";
 import { completionPatch, computerAiIds, DEFAULT_ADMIN_ORIGIN, firstRunPatch, markWelcomeFinished, resumeBeat, showWelcome, type BeatId } from "@/lib/onboarding";
@@ -23,6 +24,7 @@ import { CloudBringStep, useCloudBringOffered } from "./CloudBringStep";
 import { funnelSteps, nextStep, previousStep, type FunnelPath, type FunnelStep } from "./funnel";
 import { funnelAccount, type FunnelAccountState } from "./funnel-account";
 import { FunnelBar, PhoneStep, PlaceStep, WelcomeStep } from "./FunnelSteps";
+import { ApprovalsStep, KnowStep, OpeningStep, ProfileStep, StakeStep, type Approvals } from "./FactorySteps";
 import { MakingStep } from "./MakingStep";
 import { PermissionsStep } from "./PermissionsStep";
 import { useWelcomeAi } from "./welcome-ai";
@@ -31,6 +33,20 @@ import "../../styles/onboarding.css";
 import "../../styles/place-setup.css";
 
 type Config = ReturnType<typeof useStore>["state"]["config"];
+
+/** What the factory already has, read once so a resumed or replayed first run starts from it. */
+interface FactoryKnown {
+  settings: { country: string | null; region: string | null; budgetCents: number; companyCapCents: number; approvals: Approvals };
+  profile: { inputs: Array<{ field: string; text: string }>; constraints: string[]; seedNiches: string[] } | null;
+  relatedParties: { emails: string[]; domains: string[] };
+}
+
+const FACTORY_COPY = {
+  welcome: { title: "Meet Cofactory", sub: "Your own company factory. It finds businesses so niche only you would start them, and runs them to their first dollar." },
+  place: { title: "Where should your factory run?", sub: "Companies answer customers while you sleep. You can move it any time." },
+  phone: { title: "Approve from your phone", sub: "Scan a code with the phone app to get your factory's questions and approvals wherever you are." },
+  notify: { title: "Hear when it needs you", sub: "A notification when your factory needs an OK or finds something worth a look." },
+};
 
 /** A genuine first run on this computer's own page names the person after its account, where their profile has none
  * (never on a Cloud, a Team Cloud or a remote page). The name stays theirs to change in Settings. */
@@ -89,7 +105,8 @@ export function WelcomeFlow({
   cloudHome?: boolean;
 }) {
   const { state, dispatch } = useStore();
-  const maus = myDefaultBot(state.bots, useViewerEmail());
+  const viewerEmail = useViewerEmail();
+  const maus = myDefaultBot(state.bots, viewerEmail);
   const keepsDraft = !replay && !embedded;
   const root = useRef<HTMLDivElement>(null);
   const finishing = useRef(false);
@@ -137,6 +154,17 @@ export function WelcomeFlow({
       () => setFirstAccess((known) => (known === undefined ? null : known)));
   }, [macAccess]);
   const permissions = Boolean(macAccess) && (firstAccess === undefined || permissionsMissing(firstAccess));
+  const factory = cofactoryEnabled() && !embedded && !cloudHome;
+  const notify = Boolean(macAccess) && (firstAccess === undefined || (firstAccess?.supported === true && firstAccess.notifications !== "granted"));
+  const [factoryKnown, setFactoryKnown] = useState<FactoryKnown | null>(null);
+  const [profileDraft, setProfileDraft] = useState<ProfileDraft>(emptyDraft);
+  useEffect(() => {
+    if (!factory) return;
+    void api<FactoryKnown>("/api/cofactory/settings").then((known) => {
+      setFactoryKnown(known);
+      if (known.profile) setProfileDraft(draftFromProfile(known.profile));
+    }, () => {});
+  }, [factory]);
   const [notesLine, setNotesLine] = useState<string | null>(null);
 
   const saved = initialBeat ?? draft?.beat;
@@ -144,7 +172,7 @@ export function WelcomeFlow({
   // requires one
   const accountStep = Boolean(account) && !firstKnown.current?.signedIn;
   const stepsFor = (picked: FunnelPath | null) => funnelSteps({ account: accountStep, desktop, bring: offersMove,
-    path: picked, hello: window.duskDesktop?.remoteClient?.active !== true, phone: phoneAppEnabled(), permissions, cloudBring });
+    path: picked, hello: window.duskDesktop?.remoteClient?.active !== true, phone: phoneAppEnabled(), permissions, cloudBring, factory, notify });
   const steps = stepsFor(path);
 
   const [at, setAt] = useState<FunnelStep>(() => resumeBeat(steps, saved));
@@ -278,6 +306,7 @@ export function WelcomeFlow({
       // Escape is "not now": past an optional step, never past an account the app needs
       if (at === "account" && known?.required) return;
       if (at === "welcome" || at === "account" || at === "place" || at === "checkout" || at === "making") return;
+      if (at === "profile" || at === "stake" || at === "approvals" || at === "opening") return;
       next();
       return;
     }
@@ -287,7 +316,7 @@ export function WelcomeFlow({
   let body: ReactNode;
   switch (at) {
     case "welcome":
-      body = <WelcomeStep onStart={next} cloud={cloudHome ? { name: greetingName(state.config?.profile?.name), picture: state.config?.profile?.avatarUrl || undefined } : undefined} />;
+      body = <WelcomeStep onStart={next} copy={factory ? FACTORY_COPY.welcome : undefined} cloud={cloudHome ? { name: greetingName(state.config?.profile?.name), picture: state.config?.profile?.avatarUrl || undefined } : undefined} />;
       break;
     case "account":
       body = account ? <AccountStep account={account} known={known}
@@ -295,7 +324,7 @@ export function WelcomeFlow({
         onSkip={known?.required ? null : () => { track("onboarding_account", { action: "skipped" }); next(); }} /> : null;
       break;
     case "place":
-      body = <PlaceStep onMac={chooseMac} onCloud={chooseCloud} cloudTag={cloudTile.tag} cloudNote={cloudTile.note}
+      body = <PlaceStep onMac={chooseMac} onCloud={chooseCloud} cloudTag={cloudTile.tag} cloudNote={cloudTile.note} copy={factory ? FACTORY_COPY.place : undefined}
         onServer={() => { track("onboarding_place", { choice: "server" }); openPlaceSetup("way:cloudflare"); }} />;
       break;
     case "checkout":
@@ -308,7 +337,29 @@ export function WelcomeFlow({
       body = cloudHome ? <CloudBringStep onNext={next} /> : <BringStep grokWaiting={move.plan?.grokWaiting ?? []} onNext={next} />;
       break;
     case "phone":
-      body = <PhoneStep onNext={next} />;
+      body = <PhoneStep onNext={next} copy={factory ? FACTORY_COPY.phone : undefined} />;
+      break;
+    case "know":
+      body = <KnowStep onNext={(draft) => { if (draft) setProfileDraft(draft); track("onboarding_know", { action: draft ? "imported" : "manual" }); next(); }} />;
+      break;
+    case "profile":
+      body = <ProfileStep draft={profileDraft} onChange={setProfileDraft} country={factoryKnown?.settings.country ?? null} region={factoryKnown?.settings.region ?? null} onNext={next} />;
+      break;
+    case "stake":
+      body = <StakeStep budgetCents={factoryKnown?.settings.budgetCents ?? 0} capCents={factoryKnown?.settings.companyCapCents ?? 0} onNext={next} />;
+      break;
+    case "approvals": {
+      const known = factoryKnown?.relatedParties;
+      const emails = known && (known.emails.length || known.domains.length) ? [...known.emails, ...known.domains] : [viewerEmail].filter((item): item is string => Boolean(item));
+      body = <ApprovalsStep approvals={factoryKnown?.settings.approvals ?? { launch: "ask", spendOverCents: 2_500, kill: "tell" }} emails={emails} onNext={next} />;
+      break;
+    }
+    case "notify":
+      body = macAccess ? <PermissionsStep bridge={macAccess} kinds={["notifications"]} copy={FACTORY_COPY.notify}
+        onNext={(how, granted) => { track("onboarding_permissions", { action: how, granted }); next(); }} /> : null;
+      break;
+    case "opening":
+      body = <OpeningStep firstField={GROUP_ORDER.map((group) => profileDraft.groups[group][0]).find(Boolean) ?? null} onDone={(botId) => void finish("completed", botId)} />;
       break;
     case "making":
       body = <MakingStep onOpened={() => void finish("completed", null)} />;

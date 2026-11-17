@@ -17,6 +17,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { verifyEvidence } from "./truth/gate.ts";
 import { POSTMORTEM_CAUSES } from "./discovery/store.ts";
+import type { FactorySettings } from "./settings.ts";
 import type { Truth } from "./truth/store.ts";
 import type { Launcher } from "./runtime/launcher.ts";
 import type { Sessions } from "./runtime/sessions.ts";
@@ -85,6 +86,8 @@ export interface ToolContext {
   discovery?: Discovery;
   dossiers?: Dossiers;
   validation?: { sprints: Sprints; outreach: Outreach; rails: Rails; orders: Orders; folderOf(companyId: string): string; saveOffer(companyId: string, html: string): string };
+  /** The owner's standing choices: the per-company cap a launch may not exceed. */
+  settings?: () => FactorySettings;
   /** The seat's running session, which decisions and tool calls are filed under. */
   session?: Session | null;
 }
@@ -656,6 +659,12 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     async run(args, ctx) {
       const { book, actor, launcher } = ctx;
       if (!args.dossier_id && !args.brief.trim()) return refused("give a brief, or a dossier_id to launch from");
+      const ownerCap = ctx.settings?.().companyCapCents ?? 0;
+      if (ownerCap > 0 && args.cap_cents > ownerCap) {
+        const reason = `the owner caps each company at ${ownerCap} cents`;
+        decide(ctx, "company.launch", "refused", `${args.name} with ${args.cap_cents} cents: ${reason}`, [], null);
+        return refused(reason);
+      }
       const input = { name: args.name, brief: args.brief, capCents: args.cap_cents, ...(args.dossier_id ? { dossierId: args.dossier_id } : {}) };
       if (input.dossierId && !launcher) return refused("launching from a dossier needs the runtime");
       const result = launcher ? await launcher.launch(input, actor) : book.launch(input, actor);

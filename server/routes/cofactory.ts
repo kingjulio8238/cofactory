@@ -20,6 +20,7 @@ import type { Dossiers } from "../cofactory/dossier/dossiers.ts";
 import type { Rails } from "../cofactory/validation/rails.ts";
 import type { Sprints } from "../cofactory/validation/sprints.ts";
 import type { Orders } from "../cofactory/validation/orders.ts";
+import type { Settings } from "../cofactory/settings.ts";
 import { PROFILE_FIELDS } from "../../shared/cofactory/discovery.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
@@ -42,6 +43,7 @@ export interface CofactoryRouteDeps {
   dossiers: () => Dossiers;
   validation: () => { sprints: Sprints; rails: Rails; orders: Orders };
   relatedParties?: { get(): { emails: string[]; domains: string[] }; set(value: { emails: string[]; domains: string[] }): void };
+  settings?: Settings;
   traceDeps: () => TraceDeps;
   tick: () => Promise<void>;
   owner: (auth: RequestAuth) => boolean;
@@ -116,6 +118,14 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
         const session = runtime.store.session(id);
         if (!session) return json(res, 404, { error: "no such session" });
         return json(res, 200, { session, events: runtime.store.sessionEvents(id) });
+      }
+      if (path === "/api/cofactory/settings" && deps.settings) {
+        const deposited = book.entries({}).filter((entry) => entry.kind === "deposit").reduce((sum, entry) => sum + entry.cents, 0);
+        return json(res, 200, {
+          settings: deps.settings.get(), profile: deps.discovery().profile(), depositedCents: deposited,
+          staffed: book.members().filter((member) => member.companyId === null).map((member) => ({ role: member.role, botId: member.botId })),
+          relatedParties: deps.relatedParties?.get() ?? { emails: [], domains: [] },
+        });
       }
       if (path === "/api/cofactory/discovery") {
         const discovery = deps.discovery();
@@ -205,6 +215,24 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
       rails.set(companyId, Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)));
       record(companyId, "rails", Object.keys(input).filter((key) => input[key as keyof typeof input] !== undefined).join(", "));
       return json(res, 200, { ok: true, rails: rails.summary(companyId) });
+    }
+    if (path === "/api/cofactory/settings" && deps.settings) {
+      const input = parse(z.object({
+        country: z.string().regex(/^[A-Z]{2}$/).nullable().optional(), region: z.string().max(80).nullable().optional(),
+        budgetCents: z.number().int().min(0).max(100_000_000).optional(), companyCapCents: z.number().int().min(0).max(100_000_000).optional(),
+        approvals: z.object({ launch: z.enum(["ask", "auto"]).optional(), spendOverCents: z.number().int().min(0).max(10_000_000).optional(), kill: z.enum(["ask", "tell"]).optional() }).optional(),
+        onboarded: z.boolean().optional(),
+      }));
+      if (!input) return;
+      const { onboarded, ...patch } = input;
+      const saved = deps.settings.set({ ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)), ...(onboarded ? { onboardedAt: now() } : {}) });
+      const deposited = book.entries({}).filter((entry) => entry.kind === "deposit").reduce((sum, entry) => sum + entry.cents, 0);
+      if (saved.budgetCents > deposited) {
+        const entry = book.deposit(saved.budgetCents - deposited, "owner");
+        record(null, "deposit", `${entry.cents} cents to reach the ${saved.budgetCents}-cent budget`, { kind: "money.deposit", ok: true, reason: "the owner's monthly budget", evidence: [{ type: "ledger_entry", id: entry.id }] });
+      }
+      record(null, "settings", Object.keys(patch).join(", "));
+      return json(res, 200, { settings: saved });
     }
     if (path === "/api/cofactory/related-parties" && deps.relatedParties) {
       const input = parse(z.object({ emails: z.array(z.string().email()).max(100).default([]), domains: z.array(z.string().regex(/^[a-z0-9.-]+\.[a-z]{2,}$/i)).max(100).default([]) }));

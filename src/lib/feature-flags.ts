@@ -12,6 +12,12 @@ export function phoneAppEnabled(): boolean {
   return import.meta.env?.VITE_DUSK_PHONE_APP !== "0";
 }
 
+/** Cofactory, on in this build: the first run sets up the owner's company factory (profile, stake, approvals) and opens
+ * it. `VITE_COFACTORY=0` brings back dusk bot's own first run. */
+export function cofactoryEnabled(): boolean {
+  return import.meta.env?.VITE_COFACTORY !== "0";
+}
+
 /** Live calls, off: the call button, its mode menu, the live bar and pill, the "live key needed" prompt and the
  * live key rows in Settings all follow this one switch. The engine stays; a build with `VITE_DUSK_LIVE_CALL=1` brings it back. */
 export function liveCallEnabled(): boolean {

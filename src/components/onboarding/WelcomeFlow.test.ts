@@ -100,6 +100,8 @@ const type = async (input: HTMLInputElement, value: string) => {
 };
 
 beforeEach(() => {
+  // dusk bot's own first run; the Cofactory one has its own tests below
+  vi.stubEnv("VITE_COFACTORY", "0");
   vi.useFakeTimers();
   HTMLElement.prototype.animate = vi.fn(() => ({ onfinish: null, oncancel: null, cancel() {} }) as unknown as Animation);
   setLocale("en");
@@ -688,5 +690,84 @@ describe("the funnel's back button", () => {
     await act(async () => root.unmount());
     root = createRoot(host);
     expect(await backAt("win32"), "Windows keeps its caption buttons on the right").toBe("");
+  });
+});
+
+describe("the Cofactory first run", () => {
+  const PROFILE_ANSWER = "COFACTORY PROFILE\nFields and trades I know: pharmacy billing; DIR fee audits\nSkills: reconciliations\nPlaces I know: Ohio\nHard no's: medical advice\nHunches: DIR recovery for one-store owners\nEND PROFILE";
+  const posted = (path: string) => f.api.mock.calls.filter(([at, init]) => at === path && init?.method === "POST").map(([, init]) => JSON.parse(init.body));
+  const paste = async (value: string) => {
+    const box = document.body.querySelector<HTMLTextAreaElement>("[data-know-paste]")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, value);
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await settle();
+  };
+
+  beforeEach(() => {
+    vi.stubEnv("VITE_COFACTORY", "");
+    vi.stubEnv("VITE_DUSK_PHONE_APP", "0");
+    vi.stubGlobal("duskDesktop", { remoteClient: { active: false }, requireUserPresence: async () => true, platform: "linux" });
+    const base = f.api.getMockImplementation()!;
+    f.api.mockImplementation(async (path: string, init?: { body?: string; method?: string }) => {
+      if (path === "/api/cofactory/settings" && !init?.method) return { settings: { country: null, region: null, budgetCents: 0, companyCapCents: 0, approvals: { launch: "ask", spendOverCents: 2_500, kill: "tell" } }, profile: null, relatedParties: { emails: [], domains: [] } };
+      if (path === "/api/cofactory/factory/staff") return { ok: true, staffed: [{ role: "lead", botId: "lead-1", created: true }, { role: "scout", botId: "scout-1", created: true }] };
+      if (path.startsWith("/api/cofactory/")) return { ok: true };
+      return base(path, init);
+    });
+  });
+
+  it("asks what the factory needs, in order, saves each answer, and opens the factory on the scout", async () => {
+    await show();
+    expect(title()).toBe("Meet Cofactory");
+    await press("Get started");
+    expect(title()).toBe("Where should your factory run?");
+    await choose("[data-funnel-place=mac]");
+    await usesFoundAi();
+    expect(step(), "the profile is written by the owner's own AI, not dusk's bring step").toBe("know");
+    expect(document.body.querySelector("[data-funnel-progress]")?.getAttribute("data-funnel-progress")).toBe("4/8");
+    await paste(PROFILE_ANSWER);
+    expect(text()).toContain("Read 4 things about you");
+    await press("Continue");
+
+    expect(step()).toBe("profile");
+    expect(text()).toContain("pharmacy billing");
+    const next = button("Continue")!;
+    expect(next.disabled, "not until the owner says where they operate").toBe(true);
+    const country = document.body.querySelector<HTMLSelectElement>("[data-profile-country]")!;
+    await act(async () => { country.value = "US"; country.dispatchEvent(new Event("change", { bubbles: true })); });
+    await press("Continue");
+    expect(posted("/api/cofactory/profile")).toEqual([{ inputs: [{ field: "domains", text: "pharmacy billing" }, { field: "domains", text: "DIR fee audits" }, { field: "skills", text: "reconciliations" }, { field: "geography", text: "Ohio" }], constraints: ["medical advice"], seedNiches: ["DIR recovery for one-store owners"] }]);
+    expect(posted("/api/cofactory/settings")).toContainEqual({ country: "US", region: null });
+
+    expect(step()).toBe("stake");
+    expect(document.body.querySelector("[data-stake-summary]")?.textContent).toContain("Up to 2 companies at a time, $40 each");
+    await press("Continue");
+    expect(posted("/api/cofactory/settings")).toContainEqual({ budgetCents: 10_000, companyCapCents: 4_000 });
+
+    expect(step()).toBe("approvals");
+    expect(text(), "contacting real people can never be switched off").toContain("Always");
+    await press("Continue");
+    expect(posted("/api/cofactory/settings")).toContainEqual({ approvals: { launch: "ask", spendOverCents: 2_500, kill: "tell" } });
+
+    expect(step()).toBe("opening");
+    expect(document.body.querySelector("[data-permission=accessibility]"), "company seats never drive the owner's computer").toBeNull();
+    expect(title(), "the crew arrives one by one").toBe("Opening your factory");
+    for (let tick = 0; tick < 4; tick++) await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    await settle();
+    expect(title()).toBe("Your factory is open");
+    expect(text()).toContain("Your scout is already looking in pharmacy billing");
+    expect(posted("/api/cofactory/discovery/batches")).toHaveLength(1);
+    expect(posted("/api/cofactory/settings")).toContainEqual({ onboarded: true });
+    await press("Meet your scout");
+    expect(f.onDone).toHaveBeenCalledExactlyOnceWith("scout-1");
+  });
+
+  it("lets the owner skip the import and fill the profile in by hand", async () => {
+    await show({ initialBeat: "know" });
+    await press("I'll fill it in myself");
+    expect(step()).toBe("profile");
+    expect(button("Continue")?.disabled).toBe(true);
   });
 });

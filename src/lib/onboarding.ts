@@ -102,7 +102,7 @@ export function hintSeenPatch(
 /** Every screen the first run can show, in the order it shows them; the chat comes after the last. */
 // where the bots live comes first on the desktop app; the account follows it only where this Mac is the place (dusk cloud
 // signs in and pays in the browser, "checkout"); the Mac's permissions come last, right before the app
-export const BEAT_ORDER = ["welcome", "account", "place", "checkout", "ai", "bring", "phone", "making", "permissions"] as const;
+export const BEAT_ORDER = ["welcome", "account", "place", "checkout", "ai", "bring", "know", "profile", "stake", "approvals", "phone", "making", "permissions", "notify", "opening"] as const;
 export type BeatId = (typeof BEAT_ORDER)[number];
 
 /** Where a reloaded first run opens: the saved screen while it is offered, else the first. */
