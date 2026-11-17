@@ -92,7 +92,7 @@ describe("cofactory sessions", () => {
     const started = await request(r);
     expect(started).toMatchObject({ started: true, session: { status: "running", rounds: 1, role: "ceo" } });
     const prompt = r.starts[0]!.prompt;
-    expect(prompt).toContain("Objective: Get the offer live");
+    expect(prompt.split("\n")[0], "the line the owner reads first").toBe("CEO · Get the offer live");
     expect(prompt).toContain("Monthly DIR-fee reconciliation");
     expect(prompt).toContain("Journal, most recent last:\n(empty: this is the first session)");
     expect(prompt).toContain("cofactory_end_session");

@@ -14,6 +14,8 @@ export interface TraceDeps {
   runtime: RuntimeStore | null;
   discovery?: DiscoveryStore | null;
   sprints?: Sprints | null;
+  /** How many companies are past the first-dollar gate, for the board's cloud gate. */
+  firstDollarCompanies?: () => number;
 }
 
 /** Looks an evidence link up where it lives; null means the decision points at nothing. */

@@ -1,3 +1,4 @@
+import { cloudGate } from "./cloud-gate.ts";
 import { autonomy, companyTrace, type TraceDeps } from "./trace.ts";
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -26,6 +27,7 @@ export function boardData(deps: TraceDeps, now: number, evals: { pass: boolean; 
     decisions: deps.observe.decisions({ limit: 40 }).reverse(),
     touches: deps.observe.touches({ since: now - 7 * DAY_MS }).reverse().slice(0, 40),
     autonomy: autonomy(deps, now - 7 * DAY_MS),
+    cloudGate: cloudGate({ book: deps.book, truth: deps.truth, firstDollarCompanies: deps.firstDollarCompanies ?? (() => 0) }, now),
     evals,
   };
 }
@@ -61,6 +63,8 @@ export function renderBoardText(data: BoardData): string {
     lines.push("", "alarms:");
     for (const alarm of data.alarms) lines.push(`  ${nameOf(data, alarm.companyId)} ${alarm.kind}: ${alarm.detail}`);
   }
+  lines.push("", `cloud gate: ${data.cloudGate.ready ? "READY to build Cofactory's own cloud" : "not yet"}`);
+  for (const criterion of data.cloudGate.criteria) lines.push(`  ${criterion.met ? "ok  " : "    "} ${criterion.name}: ${criterion.value} (needs ${criterion.target})`);
   return lines.join("\n");
 }
 

@@ -12,6 +12,11 @@ export interface TurnPort {
   interrupt(botId: string, threadId: string): Promise<void>;
 }
 
+/** How a seat reads in the first line of each session, the line the owner sees in the bot's chat. */
+const ROLE_TITLES: Record<Session["role"], string> = {
+  lead: "Factory lead", scout: "Factory scout", ceo: "CEO", builder: "Builder", marketer: "Marketer", seller: "Seller", operator: "Stand-in",
+};
+
 export interface SessionRequest {
   companyId: string | null;
   botId: string;
@@ -74,8 +79,8 @@ export function createSessions(deps: SessionDeps) {
     const journal = store.journal(session.companyId, 8).map((entry) => `- ${new Date(entry.at).toISOString()} ${entry.role}: did ${entry.did}${entry.next ? `; next ${entry.next}` : ""}${entry.blockers ? `; blocked by ${entry.blockers}` : ""}`).join("\n");
     const alarms = store.openAlarms(session.companyId).map((alarm) => `- ${alarm.kind}: ${alarm.detail}`).join("\n");
     return [
-      `[Cofactory session ${session.id.slice(0, 8)} · ${session.kind} · ${session.role} seat in ${where}]`,
-      `Objective: ${session.objective}`,
+      `${ROLE_TITLES[session.role]} · ${session.objective}`,
+      `(Cofactory session ${session.id.slice(0, 8)} · ${session.kind} · ${session.role} seat in ${where})`,
       `Done when: ${session.doneWhen}`,
       `Budget: about ${minutes(session.budgetMs)} minutes and ${session.budgetCents} cents of model use.`,
       context ? `What woke this session:\n${clip(context, 6_000)}` : "",

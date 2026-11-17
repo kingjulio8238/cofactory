@@ -199,7 +199,8 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       if (settled && settled.status !== "running") log(`cofactory: sprint ${sprint.id.slice(0, 8)} ${settled.status}: ${settled.outcome}`);
     }
   }
-  const traceDeps = (): TraceDeps => ({ book: books(), truth: evidence(), observe: observe().store, runtime: runtimeParts()?.store ?? null, discovery: discoveryService().store, sprints: validationParts().sprints });
+  const traceDeps = (): TraceDeps => ({ book: books(), truth: evidence(), observe: observe().store, runtime: runtimeParts()?.store ?? null, discovery: discoveryService().store, sprints: validationParts().sprints,
+    firstDollarCompanies: () => books().companies().filter((company) => validationParts().orders.firstDollar(company.id).reached).length });
 
   function runtimeParts(): Runtime | null {
     if (runtime) return runtime;
