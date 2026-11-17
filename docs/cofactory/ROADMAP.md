@@ -636,6 +636,15 @@ company's rails without sending or creating anything:
 
 It exits non-zero until every check passes. On the shadow rails, 7 of 10 checks fail, as they should.
 
+**Going live:** [`live-sprint.md`](live-sprint.md) gives the steps:
+- a separate data dir and ports;
+- secrets loaded from a 0600 env file by `pnpm cofactory:connect`;
+- the preflight;
+- the owner's per-company `outreachArmed` switch. Outreach is refused until it is on; dry runs are always armed.
+
+The consignment-payout dossier re-verifies against the live web under today's rules: 100% of claims verified, no
+critical or structural failures.
+
 **What the exit gate still needs (the owner's identity and legal gates):**
 - **A mailbox for the company.** A dedicated domain with SPF, DKIM and DMARC, connected in dusk.
 - **A Stripe account.** A restricted key that can create payment links, plus a webhook endpoint pointed at
