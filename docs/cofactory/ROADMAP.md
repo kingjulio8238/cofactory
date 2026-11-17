@@ -18,7 +18,7 @@ stage's row and its section when its status changes. The rules behind the pipeli
 | Foundations | [F3 Runtime and persistence](#f3-runtime-and-persistence) | Done | A fake-engine company survives kills, restarts and a multi-day simulated run with no zombie state |
 | Foundations | [F4 Observability](#f4-observability) | Done | Every gate decision is traceable to its evidence and its cost |
 | Pipeline | [P1 Discovery](#p1-discovery) | Done | Signals 100% verified; divergence under the ceiling across 10 simulated profiles |
-| Pipeline | [P2 Dossiers and scoring](#p2-dossiers-and-scoring) | Done (rediscovery baseline running) | Claim verifier ≥ 95%; adversarial Q&A; post-cutoff rediscovery baseline |
+| Pipeline | [P2 Dossiers and scoring](#p2-dossiers-and-scoring) | Done | Claim verifier ≥ 95%; adversarial Q&A; post-cutoff rediscovery baseline |
 | Pipeline | [P3 Offer and validation](#p3-offer-and-validation) | Built; the real sprint waits on the owner's rails | One real sprint completed inside its cap, gates fed by real events |
 | Pipeline | [P4 First dollar](#p4-first-dollar) | Built; the live gate waits on the P3 rails | First arm's-length dollar, or a clean, post-mortemed kill |
 | Product | [X1 Owner experience](#x1-owner-experience) | Not started | The owner runs a full cycle from cards alone |
@@ -552,7 +552,22 @@ claim is involved.
 - `COFACTORY_DOSSIERS_PER_BATCH=0` keeps dossier work out of rediscovery runs.
 - The target set has 5 businesses with revenue verified by their payment providers, launched July–October 2026: small
   revenue, and 3 of the 5 only moderately niche.
-- Baseline results: see the progress log.
+- **Baseline, neutral profile, 5 targets, 3 niches each:**
+  - Exact recall is **0/5**.
+  - Buyer-level recall (`sameBuyer`: most of the target's buyer words appear in a candidate's buyer) is **3/5**.
+
+  | Target | Same buyers? | The scout's closest niche |
+  |---|---|---|
+  | Pouncio (Vinted auto-buying) | yes | Multi-marketplace resellers: per-item payout and fee reconciliation |
+  | amirelay (Vinted 3PL in France) | no | Walmart WFS sellers: lost or damaged inventory reimbursement claims |
+  | Roast My BnB (listing audits) | yes | Multi-property Airbnb/VRBO hosts: occupancy-tax registration and filings in every jurisdiction |
+  | HotelBase (direct-booking concierge) | yes | Independent hotels: OTA commission invoice audits |
+  | Beautyflow (salon software, Belgium) | no | US booth-rent salons: 1099 worker-classification setup |
+
+  The scout reaches the right buyers but chooses narrower, back-office jobs than the targets, which are
+  software products. Exact match against one known business measures the wrong thing for a scout built to find niches
+  nobody else holds. The rediscovery eval is kept as a regression signal: buyer recall should not fall. The real
+  measure of niche quality is P3's sprint outcomes.
 
 ### P3 Offer and validation
 
@@ -774,4 +789,18 @@ A virtual card and model key per company, multiple factories, and calibration re
 - **2026-11-17:** F1 done and F2 core done. Stage gates now read the world. 34 unit tests pass, and `pnpm cofactory:eval` passes. Next: F3, runtime and persistence.
 - **2026-11-17:** F3 done: sessions, journal, company folders, keep-working re-entry, restart recovery, zombie sweep, scheduler (cadence, event and message wakes), alarms and the launcher. 15 runtime tests plus a real-server kill and restart e2e. Next: F4, observability.
 - **2026-11-17:** F4 done: an append-only log of decisions with evidence and cost, tool calls and owner touches; cost by stage; session and company traces; autonomy; the ops board (page, text, CLI). The traceability eval passes at 100%. The board caught a round-start race, now fixed. Foundations F0–F4 are complete. Next: P1, discovery.
+- **2026-11-17:** P2 done:
+  - dossiers verified claim by claim;
+  - seeded adversarial Q&A;
+  - scoring with hard vetoes;
+  - the champion rule;
+  - a buyer-voice rule, job ads at most half;
+  - undeclared-risk checks;
+  - rediscovery baseline 0/5 exact, 3/5 same buyers.
+
+  P3 and P4 are built:
+  - sprints, outreach gate, intake, rails and preflight;
+  - orders, the bus-factor rehearsal, the first-dollar gate and post-mortems.
+
+  Two shadow runs on a real model found 8 faults, all fixed. Next: the owner connects rails for a real sprint.
 - **2026-11-17:** P1 done: factory profile, verified signals, niche rules, the cross-factory registry, discovery batches and scout sessions, factory staffing; evals for signals, niche rules and divergence (overlap 0.043 with the registry vs 0.717 without). Live smoke on a real model: 3 specific niches from 9 verified signals for $1.29 of model use. Fixes from it: PDFs are now read, and every niche needs buyers' own words. Next: P2, dossiers and scoring.
