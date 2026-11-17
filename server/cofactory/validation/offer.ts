@@ -11,7 +11,8 @@ export interface OfferSpec {
   paymentUrl: string | null;
   /** The form's action on this server's intake, or null when no public intake is connected. */
   formAction: string | null;
-  contactEmail: string;
+  /** The company's own mailbox, or null to offer only the form. */
+  contactEmail: string | null;
   /** The sender's postal address, which commercial email law asks a business to give. */
   postalAddress: string;
 }
@@ -44,7 +45,7 @@ input,textarea{font:inherit;padding:10px;border:1px solid #c7c7cc;border-radius:
 <p class="for">For ${escape(offer.forWhom)}</p>
 <ul>${offer.deliverables.map((line) => `<li>${escape(line)}</li>`).join("")}</ul>
 ${pay}${form}
-<footer>${escape(offer.businessName)} · <a href="mailto:${escape(offer.contactEmail)}">${escape(offer.contactEmail)}</a> · ${escape(offer.postalAddress)}</footer>
+<footer>${escape(offer.businessName)}${offer.contactEmail ? ` · <a href="mailto:${escape(offer.contactEmail)}">${escape(offer.contactEmail)}</a>` : ""} · ${escape(offer.postalAddress)}</footer>
 </body></html>`;
 }
 

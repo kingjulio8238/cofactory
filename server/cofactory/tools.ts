@@ -353,7 +353,7 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
   }),
   spec({
     name: "cofactory_start_sprint",
-    description: "Start this company's validation sprint: at most a week to put the offer in front of named buyers and get an answer from the world. It passes on one real payment, or on urgent replies from 3 different buyers; it fails when the week runs out. Returns the rails connected (mailbox, Stripe, public intake) and the outreach caps.",
+    description: "Start this company's validation sprint: list named buyers now; the week starts at the first outreach, which needs the offer page to load for a stranger. A week to put the offer in front of named buyers and get an answer from the world. It passes on one real payment, or on urgent replies from 3 different buyers; it fails when the week runs out. Returns the rails connected (mailbox, Stripe, public intake) and the outreach caps.",
     roles: ["ceo"],
     input: z.object({}),
     run(_args, ctx) {
@@ -410,18 +410,22 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
   }),
   spec({
     name: "cofactory_publish_offer",
-    description: "Write the offer page: headline, who it is for, what they get, the price, and (when connected) the payment link and a request form. It is served from the company's public intake address. Only say what the dossier can source.",
+    description: "Write the offer page: headline, who it is for, what they get, the price, and (when connected) the payment link and a request form. It is served from the company's public intake address. The contact email and postal address on it come from the company's rails, set by the owner; never put a person's details on it yourself. Only say what the dossier can source.",
     roles: ["ceo", "builder"],
     input: z.object({
       business_name: z.string().min(2).max(120), headline: z.string().min(5).max(200), for_whom: z.string().min(5).max(300),
-      deliverables: z.array(z.string().min(3).max(300)).min(1).max(8), price_line: z.string().min(2).max(120), payment_url: z.string().url().nullable().default(null),
-      contact_email: z.string().email(), postal_address: z.string().min(10).max(300),
+      deliverables: z.array(z.string().min(3).max(300)).min(1).max(8), price_line: z.string().min(2).max(120),
+      payment_url: z.string().regex(/^https:\/\/buy\.stripe\.com\/[\w-]+$/, "a Stripe payment link from cofactory_payment_link").nullable().default(null),
     }),
     run(args, ctx) {
       if (!ctx.validation) return refused("validation is not running");
       const companyId = ctx.seat.companyId!;
       const rails = ctx.validation.rails.summary(companyId);
-      const html = renderOfferPage({ businessName: args.business_name, headline: args.headline, forWhom: args.for_whom, deliverables: args.deliverables, priceLine: args.price_line, paymentUrl: args.payment_url, formAction: rails.formAction, contactEmail: args.contact_email, postalAddress: args.postal_address });
+      if (!rails.postalAddress) {
+        decide(ctx, "offer.publish", "refused", "no postal address on the company's rails", [{ type: "company", id: companyId }]);
+        return refused("the company has no postal address yet; the owner sets it on the company's rails before any page goes public");
+      }
+      const html = renderOfferPage({ businessName: args.business_name, headline: args.headline, forWhom: args.for_whom, deliverables: args.deliverables, priceLine: args.price_line, paymentUrl: args.payment_url, formAction: rails.formAction, contactEmail: rails.mailbox, postalAddress: rails.postalAddress });
       const saved = ctx.validation.saveOffer(companyId, html);
       const url = rails.publicHooksUrl ? `${rails.publicHooksUrl.replace(/\/$/, "")}/hooks/cofactory/offer/${companyId}` : null;
       if (url) ctx.validation.rails.set(companyId, { offerUrl: url });

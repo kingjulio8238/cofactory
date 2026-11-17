@@ -42,7 +42,7 @@ async function rig() {
   const sprints = openSprints(join(dir, "sprints.db"), { truth, now });
   const orders = openOrders(join(dir, "orders.db"), { now });
   const sent: Array<{ to: string; subject: string }> = [];
-  const outreach = createOutreach({ sprints, truth, mailboxFor: () => "hello@company.test", cursor: sprints.cursor, mail: { send: async (_box, input) => { sent.push(input); return { messageId: `<m${sent.length}@x>`, rejected: [] }; }, fetchNew: async () => [] } });
+  const outreach = createOutreach({ sprints, truth, mailboxFor: () => "hello@company.test", postalAddressFor: () => "100 Main St, Columbus, OH 43215", offerProblem: async () => null, cursor: sprints.cursor, mail: { send: async (_box, input) => { sent.push(input); return { messageId: `<m${sent.length}@x>`, rejected: [] }; }, fetchNew: async () => [] } });
   const rails = openRails(join(dir, "rails.json"));
   cleanups.push(async () => { await sessions.drain(); orders.close(); sprints.close(); store.close(); observeStore.close(); truth.close(); book.close(); rmSync(dir, { recursive: true, force: true }); });
 

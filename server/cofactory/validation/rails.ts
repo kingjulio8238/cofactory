@@ -15,6 +15,8 @@ export interface CompanyRails {
   /** Public origin of this server's webhook receiver, e.g. https://hooks.example.com. */
   publicHooksUrl: string | null;
   offerUrl: string | null;
+  /** The business's postal address, set by the owner: shown on the offer page and under every outreach email. */
+  postalAddress: string | null;
 }
 
 type RailsFile = Record<string, CompanyRails>;
@@ -28,12 +30,13 @@ export function openRails(file: string) {
     writeFileAtomic(file, JSON.stringify(data, null, 2), { mode: 0o600 });
     try { chmodSync(file, 0o600); } catch {}
   };
-  const blank = (): CompanyRails => ({ mailbox: null, stripeSecretKey: null, stripeWebhookSecret: null, formToken: randomBytes(18).toString("base64url"), publicHooksUrl: null, offerUrl: null });
+  const blank = (): CompanyRails => ({ mailbox: null, stripeSecretKey: null, stripeWebhookSecret: null, formToken: randomBytes(18).toString("base64url"), publicHooksUrl: null, offerUrl: null, postalAddress: null });
 
   return {
     /** The company's rails if it has any; never creates an entry, so public requests cannot grow the file. */
     peek(companyId: string): CompanyRails | null {
-      return read()[companyId] ?? null;
+      const found = read()[companyId];
+      return found ? { ...found, postalAddress: found.postalAddress ?? null } : null;
     },
     get(companyId: string): CompanyRails {
       const data = read();
@@ -51,7 +54,7 @@ export function openRails(file: string) {
       const rails = this.get(companyId);
       return {
         mailbox: rails.mailbox, stripe: Boolean(rails.stripeSecretKey), stripeWebhook: Boolean(rails.stripeWebhookSecret),
-        publicHooksUrl: rails.publicHooksUrl, offerUrl: rails.offerUrl,
+        publicHooksUrl: rails.publicHooksUrl, offerUrl: rails.offerUrl, postalAddress: rails.postalAddress ?? null,
         formAction: rails.publicHooksUrl ? `${rails.publicHooksUrl.replace(/\/$/, "")}/hooks/cofactory/form/${companyId}/${rails.formToken}` : null,
         stripeWebhookUrl: rails.publicHooksUrl ? `${rails.publicHooksUrl.replace(/\/$/, "")}/hooks/cofactory/stripe/${companyId}` : null,
       };

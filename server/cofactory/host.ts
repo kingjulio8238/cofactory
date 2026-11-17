@@ -109,7 +109,13 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     const rails = openRails(join(deps.dataDir, "cofactory-rails.json"));
     const mail: MailPort = deps.mailDryRunFile ? dryRunMailPort(deps.mailDryRunFile)
       : deps.email ? duskMailPort(deps.email) : { send: async () => { throw new Error("email is not available on this server"); }, fetchNew: async () => [] };
-    const outreach = createOutreach({ sprints, truth: evidence(), mail, mailboxFor: (companyId) => rails.peek(companyId)?.mailbox ?? null, cursor: sprints.cursor });
+    const outreach = createOutreach({ sprints, truth: evidence(), mail, mailboxFor: (companyId) => rails.peek(companyId)?.mailbox ?? null, postalAddressFor: (companyId) => rails.peek(companyId)?.postalAddress ?? null, cursor: sprints.cursor,
+      offerProblem: async (companyId) => {
+        const offerUrl = rails.peek(companyId)?.offerUrl;
+        if (!offerUrl) return "no offer page is published";
+        const check = await evidence().checkContains({ url: offerUrl, needle: `/hooks/cofactory/form/${companyId}/`, subject: `offer:${companyId}` });
+        return check.verdict === "verified" ? null : `${offerUrl} is ${check.verdict} (${check.reason})`;
+      }, });
     validation = {
       sprints, outreach, rails, orders: openOrders(join(deps.dataDir, "cofactory-orders.db")),
       folderOf: (companyId) => join(deps.dataDir, "cofactory-companies", companyId),

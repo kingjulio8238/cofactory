@@ -29,9 +29,10 @@ export function outreachGateSuite(): Suite {
       const sent: Array<{ to: string; text: string }> = [];
       const cursors = new Map<string, number>();
       const outreach = createOutreach({
-        sprints, truth, mailboxFor: () => "hello@company.test", cursor: { get: (name) => cursors.get(name) ?? 0, set: (name, value) => cursors.set(name, value) },
+        sprints, truth, mailboxFor: () => "hello@company.test", postalAddressFor: () => "100 Main St, Columbus, OH 43215", offerProblem: async () => null, cursor: { get: (name) => cursors.get(name) ?? 0, set: (name, value) => cursors.set(name, value) },
         mail: { send: async (_box, input) => { sent.push(input); return { messageId: `<m${sent.length}@x>`, rejected: [] }; }, fetchNew: async () => [] },
       });
+      const noPostal = createOutreach({ sprints, truth, mailboxFor: () => "hello@company.test", postalAddressFor: () => null, offerProblem: async () => null, cursor: { get: () => 0, set: () => {} }, mail: { send: async () => { throw new Error("must not send"); }, fetchNew: async () => [] } });
       const failures: string[] = [];
       let correct = 0, total = 0, falseAllowed = 0;
       const expect = (name: string, allowed: boolean, shouldAllow: boolean) => {
@@ -51,16 +52,24 @@ export function outreachGateSuite(): Suite {
         expect("unverifiable page", (await sprints.addTarget(id, { name: "Spa", address: "x@spa.test", channel: "email", sourceUrl: "https://fixtures.cofactory.test/spa" })).ok, false);
         sprints.suppress("owner4@riverside.test", "unsubscribe");
         const send = async (index: number) => (await outreach.send(id, targets[index]!.id, { subject: "Hello", text: "A short note about reconciliation." })).ok;
+        const offline = createOutreach({ sprints, truth, mailboxFor: () => "hello@company.test", postalAddressFor: () => "100 Main St, Columbus, OH 43215", offerProblem: async () => "unreachable", cursor: { get: () => 0, set: () => {} }, mail: { send: async () => { throw new Error("must not send"); }, fetchNew: async () => [] } });
+        expect("first contact while the offer page does not load", (await offline.send(id, targets[0]!.id, { subject: "Hello", text: "A short note about reconciliation." })).ok, false);
+        at += 5 * DAY;
+        expect("week not started before the first contact", sprints.sprint(id)!.endsAt === started.sprint.endsAt, true);
+        expect("no postal address on record", (await noPostal.send(id, targets[0]!.id, { subject: "Hello", text: "A short note about reconciliation." })).ok, false);
         expect("first contact", await send(0), true);
-        expect("opt-out on first contact", sent.at(-1)!.text.endsWith(OPT_OUT_LINE), true);
+        expect("opt-out on first contact", sent.at(-1)!.text.includes(OPT_OUT_LINE), true);
+        expect("postal address on every email", sent.at(-1)!.text.endsWith("--\n100 Main St, Columbus, OH 43215"), true);
         expect("second contact too soon", await send(0), false);
         expect("suppressed buyer", await send(3), false);
+        expect("the week starts at the first contact", sprints.sprint(id)!.endsAt === at + 7 * DAY, true);
         expect("second buyer", await send(1), true);
         expect("third buyer", await send(2), true);
         expect("daily cap", (await outreach.send(id, targets[0]!.id, { subject: "x", text: "a follow up note here" })).ok, false);
         at += 3 * DAY + 1;
         expect("follow-up after the gap", await send(0), true);
         expect("no opt-out on follow-up", !sent.at(-1)!.text.includes(OPT_OUT_LINE), true);
+        expect("postal address on a follow-up", sent.at(-1)!.text.endsWith("--\n100 Main St, Columbus, OH 43215"), true);
         expect("sprint cap", (await send(1)) && (await send(2)), false);
         at += 8 * DAY;
         expect("after the time box", await send(1), false);

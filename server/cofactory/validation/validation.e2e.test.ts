@@ -39,7 +39,7 @@ describe("cofactory validation on a real dusk server", () => {
     const url = `http://127.0.0.1:${port}`, hooks = `http://127.0.0.1:${port + 1}`;
     const tools = [
       { server: "cofactory", tool: "cofactory_start_sprint", arguments: {} },
-      { server: "cofactory", tool: "cofactory_publish_offer", arguments: { business_name: "Tender Watch", headline: "Weekly HVAC tender digests, done for you", for_whom: "commercial HVAC contractors in Ohio", deliverables: ["Every public HVAC bid in your counties, each Monday", "Deadlines and bonding in one line"], price_line: "$99 a month", contact_email: "hello@tenderwatch.test", postal_address: "100 Main St, Columbus, OH 43215" } },
+      { server: "cofactory", tool: "cofactory_publish_offer", arguments: { business_name: "Tender Watch", headline: "Weekly HVAC tender digests, done for you", for_whom: "commercial HVAC contractors in Ohio", deliverables: ["Every public HVAC bid in your counties, each Monday", "Deadlines and bonding in one line"], price_line: "$99 a month" } },
       { server: "cofactory", tool: "cofactory_add_buyer", arguments: { name: "Example Mechanical", address: "https://example.com/", channel: "contact_form", source_url: "https://example.com/" } },
       { server: "cofactory", tool: "cofactory_send_outreach", arguments: { buyer_id: "unknown", subject: "Tender digests", text: "Hello, this is a short note about weekly tender digests." } },
       { server: "cofactory", tool: "cofactory_journal", arguments: { did: "started the sprint and published the offer" } },
@@ -55,7 +55,7 @@ describe("cofactory validation on a real dusk server", () => {
     await call("POST", "/api/cofactory/deposit", { cents: 10_000 });
     const launched = await call("POST", "/api/cofactory/launch", { name: "Tender Watch", brief: "Weekly tender digests for HVAC contractors in Ohio", capCents: 4_000 });
     const companyId = launched.company.id as string;
-    const rails = await call("POST", `/api/cofactory/companies/${companyId}/rails`, { publicHooksUrl: "https://hooks.tenderwatch.test", stripeWebhookSecret: "whsec_e2e" });
+    const rails = await call("POST", `/api/cofactory/companies/${companyId}/rails`, { publicHooksUrl: "https://hooks.tenderwatch.test", stripeWebhookSecret: "whsec_e2e", postalAddress: "100 Main St, Columbus, OH 43215" });
     expect(rails.rails).toMatchObject({ stripeWebhook: true, mailbox: null, stripeWebhookUrl: `https://hooks.tenderwatch.test/hooks/cofactory/stripe/${companyId}` });
     expect(JSON.stringify(rails)).not.toContain("whsec_e2e");
 
@@ -65,6 +65,7 @@ describe("cofactory validation on a real dusk server", () => {
     const page = await until("the offer page", async () => { const response = await fetch(`${hooks}/hooks/cofactory/offer/${companyId}`); return response.ok ? response.text() : undefined; });
     expect(page).toContain("Weekly HVAC tender digests, done for you");
     expect(page).toContain(`https://hooks.tenderwatch.test/hooks/cofactory/form/${companyId}/`);
+    expect(page).toContain("100 Main St, Columbus, OH 43215");
     const decisions = (await call("GET", `/api/cofactory/decisions?company=${companyId}`)).decisions as Array<{ kind: string; verdict: string; reason: string }>;
     expect(decisions.map((decision) => [decision.kind, decision.verdict])).toEqual(expect.arrayContaining([["sprint.start", "allowed"], ["offer.publish", "allowed"], ["sprint.add_buyer", "allowed"], ["outreach.send", "refused"]]));
 

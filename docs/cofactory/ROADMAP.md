@@ -686,6 +686,34 @@ real payment, the work must be delivered by hand, and the work must not live onl
   check; an identical copy is the signal.
 - The lead judges the rehearsal, so the verdict is a model judgement. The gate's other two legs are deterministic.
 
+**Shadow run (2026-11-17), a real-model company with `COFACTORY_MAIL_DRY_RUN`:**
+
+Set-up:
+- The company was launched from the live consignment-payout dossier.
+- The mailbox was a dry-run file.
+- The public address does not resolve, and Stripe is not connected.
+
+In one 2-minute session, the CEO:
+1. published the offer;
+2. tried a payment link, which was refused because Stripe is not connected;
+3. started the sprint;
+4. checked whether the page loads (it does not, by claim check and by its own fetch);
+5. refused to advance without evidence, and asked the lead what to do.
+
+It found three faults, all fixed:
+
+| Fault | Fix |
+|---|---|
+| The page footer carried **the owner's personal email**, which the bot found in its environment, and **an invented postal address** (a registered agent's office, "c/o Cofactory"). | The page's contact email and postal address now come only from the rails the owner sets (`postalAddress`, `mailbox`). Publishing is refused without a postal address. Every outreach email ends with that address and is refused without one. The brief forbids putting anyone's own details on a page or in mail. `payment_url` must be a Stripe payment link. |
+| The CEO offered **a free first month**, which can produce no committed evidence inside the sprint. | The brief says not to give the first orders away, and to offer a money-back guarantee on a paid first month instead. |
+| **The sprint's week started before any buyer could be reached**, so the time box was being spent on a page nobody could load. | The week now starts at the first contact. The first contact is refused until the offer page loads for a stranger, checked by fetching it and finding its own form. |
+
+The `outreach-gate` eval grew to 26 cases:
+- postal address on first and follow-up emails;
+- refused without a postal address;
+- refused while the offer does not load;
+- the week starting at the first contact.
+
 **The exit gate** is the first arm's-length dollar, delivered and rehearsed, or a clean, post-mortemed kill. It needs
 the P3 rails and a real sprint, so it waits on the owner.
 

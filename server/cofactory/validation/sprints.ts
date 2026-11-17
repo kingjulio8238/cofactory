@@ -161,6 +161,7 @@ export function openSprints(file: string, deps: { truth: Truth; policy?: Partial
       if (last && now() - last.at < policy.daysBetweenTouches * DAY_MS) return { ok: false, reason: `${t.name} was contacted less than ${policy.daysBetweenTouches} days ago` };
       const touch: Touch = { id: randomUUID(), sprintId, targetId, at: now(), channel: t.channel, summary: summary.trim().slice(0, 500), messageRef: null };
       db.prepare("INSERT INTO touches (id, sprint_id, target_id, at, channel, summary, message_ref) VALUES (?, ?, ?, ?, ?, ?, NULL)").run(touch.id, sprintId, targetId, touch.at, touch.channel, touch.summary);
+      if (all.length === 0) db.prepare("UPDATE sprints SET ends_at = ? WHERE id = ?").run(now() + policy.sprintDays * DAY_MS, sprintId);
       return { ok: true, touch, optOutLine: mine.length === 0 ? OPT_OUT_LINE : null };
     },
 

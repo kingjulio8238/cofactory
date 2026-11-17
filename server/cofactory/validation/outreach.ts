@@ -20,7 +20,7 @@ const addressOf = (from: string) => (/<([^>]+)>/.exec(from)?.[1] ?? from).trim()
  * and is logged with its Message-ID so the reply can be matched. Polling turns replies into evidence and honours every
  * "stop" and bounce at once, for good.
  */
-export function createOutreach(deps: { sprints: Sprints; truth: Truth; mail: MailPort; mailboxFor(companyId: string): string | null; cursor: { get(name: string): number; set(name: string, value: number): void } }) {
+export function createOutreach(deps: { sprints: Sprints; truth: Truth; mail: MailPort; mailboxFor(companyId: string): string | null; postalAddressFor(companyId: string): string | null; offerProblem(companyId: string): Promise<string | null>; cursor: { get(name: string): number; set(name: string, value: number): void } }) {
   const { sprints, truth, mail } = deps;
 
   return {
@@ -32,9 +32,15 @@ export function createOutreach(deps: { sprints: Sprints; truth: Truth; mail: Mai
       const target = sprints.targets(sprintId).find((candidate) => candidate.id === targetId);
       if (!target) return { ok: false, reason: "that buyer is not on this sprint's list" };
       if (target.channel !== "email") return { ok: false, reason: `${target.name} is reached by ${target.channel}, not email` };
+      const postal = deps.postalAddressFor(sprint.companyId);
+      if (!postal) return { ok: false, reason: "the company has no postal address on record, which every outreach email must carry; the owner sets it" };
+      if (sprints.touches(sprintId).length === 0) {
+        const problem = await deps.offerProblem(sprint.companyId);
+        if (problem) return { ok: false, reason: `the offer must load for a stranger before the first contact: ${problem}` };
+      }
       const gate = sprints.authorizeTouch(sprintId, targetId, `email: ${input.subject}`);
       if (!gate.ok) return gate;
-      const text = gate.optOutLine ? `${input.text.trimEnd()}\n\n${gate.optOutLine}` : input.text;
+      const text = [input.text.trimEnd(), gate.optOutLine ?? "", `--\n${postal}`].filter(Boolean).join("\n\n");
       const headers = { "List-Unsubscribe": `<mailto:${mailbox}?subject=unsubscribe>` };
       try {
         const sent = await mail.send(mailbox, { to: target.address, subject: input.subject, text, headers });
