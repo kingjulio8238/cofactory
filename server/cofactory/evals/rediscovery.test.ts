@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { matchesTarget, profileFor, rediscoveryRecall, type RediscoveryTarget } from "./rediscovery.ts";
+import { matchesTarget, profileFor, rediscoveryRecall, sameBuyer, type RediscoveryTarget } from "./rediscovery.ts";
 
 const targets = JSON.parse(readFileSync(new URL("../../../docs/cofactory/research/rediscovery/targets.json", import.meta.url), "utf8")) as RediscoveryTarget[];
 
@@ -29,6 +29,9 @@ describe("rediscovery", () => {
       { target: { ...first!, buyer: "funeral homes", job: "obituary drafting" }, candidates: [{ buyer: "dentists", job: "recall reminders" }] },
     ]);
     expect(result.recall).toBe(0.5);
+    expect(result.buyerRecall).toBe(0.5);
+    expect(sameBuyer({ buyer: "Airbnb hosts" }, { buyer: "Small multi-property Airbnb/VRBO hosts and co-hosting companies" })).toBe(true);
+    expect(sameBuyer({ buyer: "Vinted resellers" }, { buyer: "estate-sale companies" })).toBe(false);
     expect(profileFor(first!).inputs.map((input) => input.text)).toContain(first!.domain);
   });
 });
