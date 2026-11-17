@@ -24,6 +24,7 @@ import { openPlaceSetup } from "@/lib/place-setup";
 import { ThreadRefsProvider } from "@/components/ThreadRefs";
 import { parseComputerHelp } from "@/lib/computer-control";
 import { Sidebar } from "@/components/Sidebar";
+import { CompanyRail } from "@/components/CompanyRail";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
@@ -325,6 +326,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         <ChevronLeft size={20} aria-hidden="true" className="hidden max-md:block" />
       </button>
       <PlacesRail />
+      <CompanyRail />
       {/* A framed window shows the app, its sidebar and the chat or page, as one square pane under the top bar and beside
           the window's rail, running to the window's right and bottom edges. */}
       <div data-window-card={framed ? "" : undefined}

@@ -137,6 +137,27 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
         const { sprints, orders, rails } = deps.validation();
         return json(res, 200, seatView({ botId: seatPath[1]!, book, runtime: runtime?.store ?? null, discovery: deps.discovery(), sprints, orders, rails, settings: deps.settings.get(), approvals: deps.approvals?.store() ?? null, now: now() }));
       }
+      if (path === "/api/cofactory/rail") {
+        const approvals = deps.approvals?.store().pending() ?? [];
+        const alarms = runtime?.store.openAlarms() ?? [];
+        const members = book.members();
+        const needs = (companyId: string | null) => approvals.filter((approval) => approval.companyId === companyId).length + alarms.filter((alarm) => alarm.companyId === companyId).length;
+        const { rails } = deps.validation();
+        return json(res, 200, {
+          onboarded: Boolean(deps.settings?.get().onboardedAt),
+          factory: {
+            botIds: members.filter((member) => member.companyId === null).map((member) => member.botId),
+            leadBotId: members.find((member) => member.role === "lead")?.botId ?? null,
+            needs: needs(null),
+          },
+          companies: book.companies().filter((company) => company.status === "live").map((company) => ({
+            id: company.id, name: company.name, stage: company.stage, capCents: company.capCents, availableCents: book.available(company.id),
+            live: rails.peek(company.id)?.armedAt != null, needs: needs(company.id),
+            botIds: members.filter((member) => member.companyId === company.id).map((member) => member.botId),
+            ceoBotId: members.find((member) => member.companyId === company.id && member.role === "ceo")?.botId ?? null,
+          })),
+        });
+      }
       if (path === "/api/cofactory/approvals" && deps.approvals) {
         return json(res, 200, { approvals: deps.approvals.store().pending() });
       }

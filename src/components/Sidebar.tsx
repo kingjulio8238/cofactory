@@ -38,7 +38,7 @@ import { BOT_CHATS_SECTION_ID, BOTS_SECTION_ID, CHANNELS_SECTION_ID, PINNED_SECT
 import { stepKey } from "@/lib/sidebar-bot-drop";
 import { botRowDropClass, useSidebarBotDrag, type BotRowDrag } from "./SidebarBotDrag";
 import { useSidebarSections } from "./SidebarSections";
-import { departmentNames } from "./bot-sections";
+import { departmentNames } from "./bot-sections"; import { useScopeFilter } from "@/lib/factory-scope";
 import { sidebarSectionAttention } from "@/lib/sidebar-attention";
 import { botListItemPointerIntent } from "@/lib/sidebar-selection";
 import { SidebarFooter } from "./SidebarFooter";
@@ -897,12 +897,12 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   const q = query.trim().toLowerCase();
   useActivityReorder(sidebarRef, !q);
   useNamesReturn(sidebarRef, rail);
-  const sections = useSidebarSections({ simple, rail, density, query: q, label: sectionLabel, sidebarRef });
+  const sections = useSidebarSections({ simple, rail, density, query: q, label: sectionLabel, sidebarRef }), inScope = useScopeFilter();
   const botDrag = useSidebarBotDrag({ dispatch, announce: sections.announce, onNamed: sections.focusHeader, onRenamed: sections.renamed,
     onError: (text) => setTeamFeedback({ error: true, text }), onCancelled: () => sidebarRef.current?.focus() });
 
   const matchingBots = state.bots
-    .filter((b) => !b.hidden)
+    .filter((b) => !b.hidden && inScope(b.id))
     .filter(
       (b) =>
         !q ||

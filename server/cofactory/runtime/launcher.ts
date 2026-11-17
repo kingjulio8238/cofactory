@@ -7,7 +7,7 @@ import type { Dossier } from "../../../shared/cofactory/dossier.ts";
 
 /** How a seat's bot looks: a dusk colour and body, which the app draws as that role's character. */
 export interface SeatLook {
-  color: "blue" | "red" | "purple" | "green" | "pink" | "yellow" | "silver";
+  color: "blue" | "red" | "purple" | "green" | "pink" | "yellow" | "silver" | "orange" | "teal" | "coral" | "cyan" | "brown";
   body: "drip" | "sprout" | "bruin" | "boxo" | "boo" | "hop" | "hoot";
 }
 
@@ -21,6 +21,20 @@ export const ROLE_LOOKS: Record<CompanyRole | FactoryRole, SeatLook> = {
   seller: { color: "yellow", body: "hop" },
   operator: { color: "silver", body: "hoot" },
 };
+
+/** A company's own colour, worn by its whole crew so it reads as one team; the factory's blue and red are left out. */
+const COMPANY_COLORS: SeatLook["color"][] = ["purple", "green", "orange", "teal", "pink", "coral", "yellow", "cyan", "brown"];
+
+export function companyColor(companyId: string): SeatLook["color"] {
+  let hash = 0x811c9dc5;
+  for (const char of companyId) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619) >>> 0;
+  return COMPANY_COLORS[hash % COMPANY_COLORS.length]!;
+}
+
+/** A company seat's look: the role's shape in the company's colour. */
+export function companySeatLook(role: CompanyRole, companyId: string): SeatLook {
+  return { color: companyColor(companyId), body: ROLE_LOOKS[role].body };
+}
 
 export interface PlaybookSeat {
   role: CompanyRole;
@@ -160,7 +174,7 @@ export function createLauncher(deps: LauncherDeps) {
       await deps.workspaces.ensure(company.id, fill(playbook.brief, company));
       const team: Array<{ role: CompanyRole; botId: string }> = [];
       for (const seat of playbook.seats) {
-        const botId = await deps.createBot({ name: `${company.name} · ${ROLE_NAMES[seat.role]}`, instructions: fill(seat.instructions, company), section: `Cofactory · ${company.name}`, look: ROLE_LOOKS[seat.role] });
+        const botId = await deps.createBot({ name: `${company.name} · ${ROLE_NAMES[seat.role]}`, instructions: fill(seat.instructions, company), section: `Cofactory · ${company.name}`, look: companySeatLook(seat.role, company.id) });
         const seated = deps.book.seat({ botId, role: seat.role, companyId: company.id });
         if (!seated.ok) return seated;
         team.push({ role: seat.role, botId });
