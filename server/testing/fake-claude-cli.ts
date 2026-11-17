@@ -1096,7 +1096,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
 
   if (process.env.FAKE_CLAUDE_CONNECT_APPS) connectApps(process.env.FAKE_CLAUDE_CONNECT_APPS.split(",").filter(Boolean));
   if (process.env.FAKE_CLAUDE_MCP_TOOLS || process.env.FAKE_CLAUDE_MCP_TOOL_ROUTES) {
-    for (const call of (process.env.FAKE_CLAUDE_MCP_TOOLS ? JSON.parse(process.env.FAKE_CLAUDE_MCP_TOOLS) : Object.entries(JSON.parse(readFileSync(process.env.FAKE_CLAUDE_MCP_TOOL_ROUTES!, "utf8")) as Record<string, unknown[]>).find(([marker]) => String(prompt ?? "").includes(marker))?.[1] ?? []) as Array<{ server?: string; tool: string; arguments?: Record<string, unknown> }>) {
+    for (const call of (process.env.FAKE_CLAUDE_MCP_TOOLS ? JSON.parse(process.env.FAKE_CLAUDE_MCP_TOOLS) : Object.entries(JSON.parse(readFileSync(process.env.FAKE_CLAUDE_MCP_TOOL_ROUTES!, "utf8")) as Record<string, unknown[]>).find(([marker]) => JSON.stringify(prompt ?? "").includes(marker))?.[1] ?? []) as Array<{ server?: string; tool: string; arguments?: Record<string, unknown> }>) {
       callMcpTool(call.server ?? "agents", call.tool, call.arguments ?? {});
     }
   }

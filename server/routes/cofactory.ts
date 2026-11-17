@@ -192,6 +192,7 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
         const ids = companyParam ? [companyParam] : book.companies().map((company) => company.id);
         return json(res, 200, { sprints: ids.map((id) => sprints.running(id)).filter((sprint) => sprint !== null).map((sprint) => ({
           sprint, evidence: sprints.evidence(sprint!.id), buyers: sprints.targets(sprint!.id).length, contacts: sprints.touches(sprint!.id).length,
+          targets: sprints.targets(sprint!.id).map((target) => ({ id: target.id, name: target.name, channel: target.channel })),
         })) });
       }
       if (path === "/api/cofactory/dossiers") return json(res, 200, { niches: deps.dossiers().board(), stillNeedDossier: deps.dossiers().wanted() });
