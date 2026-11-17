@@ -6,8 +6,8 @@ import { MODAL_PAGES, pendingPanelModal, takePanelModalRequest } from "./modals/
 import { isSimplePage, PAGE_IDS, PAGES, PANEL_TABS, resolveTarget, sectionTarget, SIMPLE_PAGES, TAB_LABEL } from "./page-registry";
 
 describe("the bot panel's page registry", () => {
-  it("has three tabs: Details, Computer and Advanced", () => {
-    expect(PANEL_TABS).toEqual(["details", "computer", "advanced"]);
+  it("has three tabs, Details, Computer and Advanced, and a Factory tab first for a Cofactory seat", () => {
+    expect(PANEL_TABS).toEqual(["factory", "details", "computer", "advanced"]);
   });
 
   it("lands every settings section on a tab, and on a Simple page that lives on that tab", () => {
@@ -51,7 +51,7 @@ describe("the bot panel's page registry", () => {
       if (PAGES[id].intro) expect(keys[PAGES[id].intro], id).toBeTruthy();
     }
     for (const tab of PANEL_TABS) expect(keys[TAB_LABEL[tab]]).toBeTruthy();
-    expect(PANEL_TABS.map((tab) => keys[TAB_LABEL[tab]])).toEqual(["Details", "Computer", "Advanced"]);
+    expect(PANEL_TABS.map((tab) => keys[TAB_LABEL[tab]])).toEqual(["Factory", "Details", "Computer", "Advanced"]);
     expect(keys[PAGES.settings.title]).toBe("Bot settings");
   });
 

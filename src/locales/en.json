@@ -4279,6 +4279,7 @@
   "botPanel.none": "None",
   "botPanel.tab.computer": "Computer",
   "botPanel.tab.details": "Details",
+  "botPanel.tab.factory": "Factory",
   "botPanel.tab.library": "Library",
   "botPanel.tab.advanced": "Advanced",
   "botPanel.section.thisBot": "This bot",

@@ -22,6 +22,7 @@ import type { Rails } from "../cofactory/validation/rails.ts";
 import type { Sprints } from "../cofactory/validation/sprints.ts";
 import type { Orders } from "../cofactory/validation/orders.ts";
 import type { Settings } from "../cofactory/settings.ts";
+import { seatView } from "../cofactory/seat-view.ts";
 import { drawTerritories, territoryCode, territoryText } from "../cofactory/discovery/territories.ts";
 import { PROFILE_FIELDS } from "../../shared/cofactory/discovery.ts";
 import { PASS, type RouteContext } from "./table.ts";
@@ -34,6 +35,7 @@ const seat = z.union([
 const COMPANY_ACTION = /^\/api\/cofactory\/companies\/([\w-]+)\/(freeze|unfreeze|kill|wake)$/;
 const TRACE = /^\/api\/cofactory\/trace\/(session|company)\/([\w-]+)$/;
 const RAILS = /^\/api\/cofactory\/companies\/([\w-]+)\/rails$/;
+const SEAT = /^\/api\/cofactory\/seat\/([\w-]+)$/;
 const DAY_MS = 24 * 60 * 60_000;
 
 export interface CofactoryRouteDeps {
@@ -125,6 +127,11 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
         const session = runtime.store.session(id);
         if (!session) return json(res, 404, { error: "no such session" });
         return json(res, 200, { session, events: runtime.store.sessionEvents(id) });
+      }
+      const seatPath = SEAT.exec(path);
+      if (seatPath && deps.settings) {
+        const { sprints, orders, rails } = deps.validation();
+        return json(res, 200, seatView({ botId: seatPath[1]!, book, runtime: runtime?.store ?? null, discovery: deps.discovery(), sprints, orders, rails, settings: deps.settings.get(), now: now() }));
       }
       if (path === "/api/cofactory/settings" && deps.settings) {
         const deposited = book.entries({}).filter((entry) => entry.kind === "deposit").reduce((sum, entry) => sum + entry.cents, 0);

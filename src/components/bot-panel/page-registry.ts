@@ -2,10 +2,11 @@ import type { LocaleKey } from "@/locales";
 import type { BotSettingsSection } from "@/state/store";
 import { isModalPage, requestPanelModal, type SheetPage } from "./modals/panel-modal";
 
-export const PANEL_TABS = ["details", "computer", "advanced"] as const;
+export const PANEL_TABS = ["factory", "details", "computer", "advanced"] as const;
 export type PanelTab = (typeof PANEL_TABS)[number];
 
 export const TAB_LABEL: Record<PanelTab, LocaleKey> = {
+  factory: "botPanel.tab.factory",
   details: "botPanel.tab.details",
   computer: "botPanel.tab.computer",
   advanced: "botPanel.tab.advanced",
@@ -96,6 +97,7 @@ const SECTION_TARGET: Record<BotSettingsSection, PanelTarget> = {
   history: { tab: "details" },
   usage: { tab: "details", anchor: "model" },
   computer: { tab: "computer" },
+  factory: { tab: "factory" },
 };
 
 export function sectionTarget(section: BotSettingsSection): PanelTarget {

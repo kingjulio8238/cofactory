@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAmbientAway } from "@/ambient/away";
 import { emailGateDone } from "@/lib/analytics";
+import { cofactoryEnabled } from "@/lib/feature-flags";
 import { clearWelcomeDraft } from "@/lib/welcome-draft";
 import { openedFromTheApp } from "@/lib/cloud-welcome";
 import { LOCAL_VIEWER, welcomeDue, welcomeViewer, type WelcomeViewer } from "@/lib/onboarding";
@@ -80,7 +81,7 @@ export function WelcomeGate({ viewer }: { viewer: WelcomeViewer | null }) {
         const target = botId ?? (replay ? null : fallback?.id);
         if (target) dispatch({ type: "select", id: target });
         // the panel opens beside the first chat only where it docks: over it, it would dim and cut the chat's first words
-        if (target && !replay && panelDocks()) dispatch({ type: "toggleSettings", open: true });
+        if (target && !replay && panelDocks()) dispatch({ type: "toggleSettings", open: true, ...(cofactoryEnabled() ? { section: "factory" as const } : {}) });
         if (target) focusComposerWhenShown();
       }}
     />

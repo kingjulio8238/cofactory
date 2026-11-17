@@ -542,6 +542,7 @@ export type AppSettingsSection =
   | "texting" | "permissions" | "advanced" | "apps" | "looks" | "bots" | "data" | "builder" | "about" | "transfer" | "voice";
 
 export type BotSettingsSection =
+  | "factory"
   | "overview"
   | "identity"
   | "slack"

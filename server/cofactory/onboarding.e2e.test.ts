@@ -51,6 +51,16 @@ describe("opening a factory from the first run, on a real dusk server", () => {
     expect(state.settings.onboardedAt).toBeGreaterThan(0);
     expect((await call("GET", "/api/cofactory/discovery")).batch?.batch).toMatchObject({ closedAt: null, note: "the factory's first search" });
 
+    const scout = opened.staffed.find((seat: { role: string }) => seat.role === "scout").botId as string;
+    const view = await call("GET", `/api/cofactory/seat/${scout}`);
+    expect(view.seat).toMatchObject({ role: "scout", companyId: null });
+    expect(view.factory.territories.map((territory: { title: string }) => territory.title)).toEqual(opened.territories.map((text: string) => text.replace(/ \(NAICS \d{6}\)$/, "")));
+    expect(view.factory.checklist).toEqual([
+      { id: "search", state: "running" }, { id: "shortlist", state: "todo" }, { id: "launch", state: "todo" }, { id: "live", state: "todo" }, { id: "dollar", state: "todo" },
+    ]);
+    expect((await call("GET", "/api/cofactory/seat/not-a-seat")).seat, "a bot without a seat has no Factory tab").toBeNull();
+    const board = await fetch(`${url}/api/cofactory/board.txt`).then((response) => response.text());
+    expect(board).toContain("cloud gate: not yet");
     const again = await call("POST", "/api/cofactory/factory/open", {});
     expect(again.territories, "opening twice keeps the same territories and seats").toEqual(opened.territories);
     expect(again.staffed.every((seat: { created: boolean }) => !seat.created)).toBe(true);

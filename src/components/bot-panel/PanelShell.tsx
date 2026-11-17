@@ -9,6 +9,8 @@ import { Icon } from "../Icon";
 import { useCaptionChrome } from "../DesktopCapabilities";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import { ComputerTab } from "./ComputerTab";
+import { FactoryTab, useSeat } from "./FactoryTab";
+import { cofactoryEnabled } from "@/lib/feature-flags";
 import { panelTabs, screenViewAllowed } from "@/lib/store-app";
 import { PAGES, resolveTarget, TAB_LABEL, type PanelTab, type PanelTarget, type SimplePageId } from "./page-registry";
 import { lazyScreen } from "../lazy-screen";
@@ -37,7 +39,17 @@ export function BotPanel({ bot, derived, linkedSection, computerRequest = 0, onC
 }) {
   const { dragProps } = useCaptionChrome();
   const link = usePanelLink();
-  const [tab, setTab] = useState<PanelTab>(() => { const first = initialTarget(linkedSection, link).tab; return panelTabs().includes(first) ? first : "details"; });
+  const seat = useSeat(bot.id, cofactoryEnabled());
+  const seated = Boolean(seat);
+  const [tab, setTab] = useState<PanelTab>(() => { const first = initialTarget(linkedSection, link).tab; return panelTabs({ factory: true }).includes(first) ? first : "details"; });
+  // a seated bot opens on its Factory tab once its seat is known, unless a tab was asked for or picked
+  const tabChosen = useRef(Boolean(linkedSection && linkedSection !== "overview"));
+  useEffect(() => {
+    if (seat === undefined) return;
+    if (seat && !tabChosen.current && tab === "details") setTab("factory");
+    if (!seat && tab === "factory") setTab("details");
+    tabChosen.current = true;
+  }, [seat, tab]);
   const [stack, setStack] = useState<SimplePageId[]>(() => {
     const page = initialTarget(linkedSection, link).page;
     return page ? [page] : [];
@@ -52,7 +64,7 @@ export function BotPanel({ bot, derived, linkedSection, computerRequest = 0, onC
   const scrollTop = () => bodyRef.current?.scrollTo({ top: 0 });
   const go = (to: PanelTarget) => {
     const target = resolveTarget(to);
-    if (!panelTabs().includes(target.tab)) return;
+    if (!panelTabs({ factory: seated }).includes(target.tab)) return;
     setTab(target.tab);
     setStack(target.page ? [target.page] : []);
     setAnchor(target.anchor ?? null);
@@ -154,7 +166,7 @@ export function BotPanel({ bot, derived, linkedSection, computerRequest = 0, onC
             label={t("botPanel.ui.botSettingsSimpleTabs")}
             value={tab}
             onChange={openTab}
-            tabs={panelTabs().map((id) => ({ value: id, label: t(TAB_LABEL[id]) }))}
+            tabs={panelTabs({ factory: seated }).map((id) => ({ value: id, label: t(TAB_LABEL[id]) }))}
           />
         </div>
       </div>
@@ -164,6 +176,7 @@ export function BotPanel({ bot, derived, linkedSection, computerRequest = 0, onC
         initial={reduced || !tabSwapped ? false : SWAP.initial}
         animate={SWAP.animate}
       >
+        {tab === "factory" && seat && <FactoryTab view={seat} />}
         {tab === "details" && <PanelDetailsTab bot={bot} derived={derived} onOpen={openPage} />}
         {tab === "computer" && screenViewAllowed() && <ComputerTab bot={bot} derived={derived} onOpen={openPage} />}
         {tab === "advanced" && <PanelAdvancedTab bot={bot} derived={derived} onOpen={openPage} />}

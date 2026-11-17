@@ -792,6 +792,32 @@ The board as home, inbox cards, standups, the kill switch, onboarding and the ph
 ### X2 Hard rails and scale
 A virtual card and model key per company, multiple factories, and calibration re-fit on post-mortems.
 
+**Cofactory's own cloud: deferred until its gate opens.** dusk's hosted cloud is all in this repo:
+- `apps/dashboard`: the account service, with billing on Dodo Payments;
+- `apps/cloud-service`: one InstaBox microVM per customer;
+- a Cloudflare edge Worker and the link services.
+
+So we can run our own copy. It needs:
+- accounts: Cloudflare, InstaBox, a VPS, MongoDB, a mail sender, and Dodo, or a new Stripe provider;
+- our own signing keys;
+- about a dozen hard-coded `dusk.bot` addresses changed;
+- a deploy and release pipeline of our own;
+- the licence settled.
+
+`docs/cloud-pro.md` describes an older Fly.io design and is out of date.
+
+The gate is read from the factory's own records, by `server/cofactory/observe/cloud-gate.ts`, and shown at the foot of
+the ops board ("cloud gate: not yet" / "READY"). All three must hold:
+
+| Criterion | Target | Why |
+|---|---|---|
+| Companies past the first-dollar gate | 3 or more | The product works before we host it |
+| Customers kept waiting 6 h+ while the factory was offline, over 30 days | 2 or more | Running on the owner's computer is costing money. Measured as an inbound reply, payment or form received more than 6 h after it happened. |
+| Revenue over 30 days against one cloud machine | 3 times the monthly cost of one machine or more | Hosting pays for itself. `COFACTORY_CLOUD_MONTHLY_CENTS` holds the cost, an estimate of $30 until a provider quote. |
+
+Also needed, but not measurable from the records: the backend's licence (PolyForm Noncommercial) is settled with its
+holder before Cofactory sells hosting.
+
 ## Progress log
 
 - **2026-11-17:** F0 done. Roadmap approved. F1 and F2 started.

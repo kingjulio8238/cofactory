@@ -20,7 +20,7 @@ export function screenViewAllowed(): boolean {
   return kind() !== "ios";
 }
 
-/** The bot and room panel tabs this app shows. */
-export function panelTabs(): readonly PanelTab[] {
-  return screenViewAllowed() ? PANEL_TABS : PANEL_TABS.filter((tab) => tab !== "computer");
+/** The bot and room panel tabs this app shows; the Factory tab only for a bot holding a Cofactory seat. */
+export function panelTabs(options: { factory?: boolean } = {}): readonly PanelTab[] {
+  return PANEL_TABS.filter((tab) => (tab !== "computer" || screenViewAllowed()) && (tab !== "factory" || options.factory === true));
 }
