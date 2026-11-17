@@ -16,27 +16,42 @@ for a business that does not exist yet.
 
 ## Screens
 
-| # | Screen | dusk beat it reuses | What it asks | Why the factory needs it | What it writes |
+The first draft asked what the owner knows, which defeats the point: the factory's bots do the work. Now the first run
+asks only what a person must supply. Uniqueness comes from the factory itself. On opening, it draws 6 territories,
+industries from the 2022 NAICS list (`server/cofactory/discovery/territories.ts`), seeded per factory and spread across
+sectors. They become the profile the scout searches from.
+
+The `territories` eval:
+- 200 factories: 3.5% of pairs share one industry;
+- every draw spans at least 6 sectors;
+- a seed reproduces its draw;
+- avoided territories never return.
+
+| # | Screen | dusk beat it reuses | What it asks | Why only a person can answer | What it writes |
 |---|---|---|---|---|---|
-| 1 | **Meet Cofactory.** "Your own company factory. It finds businesses so niche only you would start them, and runs them to their first dollar." | `welcome` | Nothing | Sets the promise | None |
-| 2 | **Account** | `account` | Sign in, or skip | Sync with the phone and the cloud. Your email seeds your own addresses (screen 8). | dusk account |
-| 3 | **Where your factory runs** | `place` and `checkout` | This Mac / dusk cloud / your own server | Companies answer customers while you sleep, and the cloud gives the public intake address with no tunnel. Cloud is recommended here, unlike dusk. | dusk place |
-| 4 | **Which AI runs your crew** | `ConnectAi` / `AiStep` | Engine sign-in (Claude Code, ChatGPT and others) | Nothing runs without it. Model use is billed to your subscription and tracked as shadow cost. | dusk instances |
-| 5 | **Bring what you know** | `bring` | Copy a prompt into the AI that knows you best. It returns your factory profile: fields and trades you know, skills, places, languages, interests, hard no's. Paste it back. | The profile is what keeps your niches from being everyone's niches (the divergence eval: 0.04 overlap with a profile vs 0.72 without), and your AI already knows it | Draft profile |
-| 6 | **Your profile** | (new; same cards) | Review and edit the profile as chips; country (and state in the US); up to 3 hunches as optional seed niches | Country sets the outreach rules and which niches are legal to run. Hunches are optional. | `POST /api/cofactory/profile` |
-| 7 | **Your stake** | (new) | A monthly budget and a cap per company, shown as "up to N companies at $X each" | The books gate every launch and every spend | Deposit and policy |
-| 8 | **What needs your OK** | (new) | Toggles, see the list below; also your own emails and domains, prefilled from the account | You stay in control of every outward step | Approvals and related parties |
-| 9 | **Stay in the loop** | `phone` and the Notifications row of `permissions` | Pair the phone, allow notifications | Approvals and escalations reach you wherever you are; an inbox nobody opens is how the lead's escalation got lost | dusk phone, notifications |
-| 10 | **Your factory is opening** | `making` / "Almost there" | Nothing | The Lead and the Scout arrive, then the first discovery batch starts in your fields | Staff the factory, start a batch |
+| 1 | **Meet Cofactory** | `welcome` | Nothing | Sets the promise | None |
+| 2 | **Account** | `account` | Sign in, or skip | Sync with the phone and the cloud; your email pre-fills your own addresses | dusk account |
+| 3 | **Where should your factory run?** | `place` and `checkout` | This Mac / dusk cloud / your own server | Where it runs is your machine or your bill | dusk place |
+| 4 | **Your AI** | `ConnectAi` / `AiStep` | Engine sign-in | The crew runs on your plan | dusk instances |
+| 5 | **Where are you based?** | (new) | Country, plus state or province where it matters | The companies are yours, so your rules for contacting people, payments and tax apply | `settings.country`, `region` |
+| 6 | **Your stake** | (new) | A monthly budget and a cap per company | Your money | Settings; the budget is deposited |
+| 7 | **Anything in mind?** | (new, skippable) | Look here first (up to 3) and never run | Optional: your earlier answer that the owner *may* point the factory somewhere | `settings.hunches`, `never`, which become seed niches and constraints |
+| 8 | **What needs your OK** | (new) | Defaults set, so usually one Continue | Your control over outward steps | Approvals and related parties |
+| 9 | **Approve from your phone** | `phone` | Pair the phone | Approvals reach you anywhere | dusk phone |
+| 10 | **Hear when it needs you** | the Notifications row of `permissions` | Allow notifications | Only you can grant it | macOS |
+| 11 | **Your factory is open** | `making` / "Almost there" | Nothing | The factory draws its territories, the Lead and Scout arrive, the first search starts, and the first 3 territories are shown | `POST /api/cofactory/factory/open` |
 
 The toggles on screen 8, with defaults:
-- launch a company: ask;
-- contact real people: ask, always;
-- spend over $X: ask;
-- kill a company: tell me afterwards, with the post-mortem.
+- contact real people: always asks, and cannot be turned off;
+- start a company: ask;
+- spend over $25: ask;
+- close a company: tell me afterwards, with the post-mortem.
 
-**Dropped:** "Let your bots use this Mac" (Accessibility, Screen Recording). Company seats must never drive your Mac or
-phone; they are fenced off from them. Only the Notifications row survives, in screen 9.
+**Dropped:**
+- What the owner knows (fields, skills, people, assets, languages, interests) and the prompt that imported it from
+  another AI.
+- "Let your bots use this Mac" (Accessibility, Screen Recording): company seats are fenced off from the owner's Mac and
+  phone.
 
 ## After onboarding: the activation checklist
 
@@ -55,7 +70,9 @@ Line 6 is the only point where money and identity are asked for, and only for a 
 
 ## Not built yet
 
-- Approval settings: only arming outreach exists today.
-- The country field and per-country outreach rules.
-- The profile import prompt.
+- Approvals beyond the per-company cap and arming outreach: the launch, spend and close switches are saved but not yet
+  enforced.
+- Per-country outreach rules: the country is recorded, and the US rules (CAN-SPAM) are the only ones implemented.
+- New territories for later batches: the factory keeps its first draw.
+- The cloud path: dusk cloud keeps dusk's own flow.
 - The factory home and its checklist.

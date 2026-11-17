@@ -25,8 +25,8 @@ export interface FunnelFacts {
   cloudBring?: boolean;
   /** this Mac still lacks a permission a bot needs to use it (Accessibility, Screen Recording, Notifications) */
   permissions?: boolean;
-  /** the first run sets up a Cofactory factory: what the owner knows, the profile, the stake and approvals, and the factory
-   * opening, in place of dusk's bring step and the Mac's use permissions (company seats never drive the owner's Mac) */
+  /** the first run sets up a Cofactory factory: where the owner is based, the stake, an optional hunch, approvals, and the
+   * factory opening, in place of dusk's bring step and the Mac's use permissions (company seats never drive the owner's Mac) */
   factory?: boolean;
   /** notifications are still off on this Mac (the factory's one permission) */
   notify?: boolean;
@@ -38,7 +38,7 @@ export interface FunnelFacts {
 export function funnelSteps(facts: FunnelFacts): FunnelStep[] {
   const cloud = facts.desktop && facts.path === "cloud";
   const factory = Boolean(facts.factory) && !cloud;
-  const FACTORY_ONLY: readonly FunnelStep[] = ["know", "profile", "stake", "approvals", "opening"];
+  const FACTORY_ONLY: readonly FunnelStep[] = ["where", "stake", "hunch", "approvals", "opening"];
   return FUNNEL_STEPS.filter((step) => {
     if (FACTORY_ONLY.includes(step)) return factory;
     if (step === "notify") return factory && facts.desktop && Boolean(facts.notify);

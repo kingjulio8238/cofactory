@@ -18,12 +18,19 @@ export interface FactorySettings {
     spendOverCents: number;
     kill: "ask" | "tell";
   };
+  /** Places the owner asked the factory to look first; it still has to find evidence for them. */
+  hunches: string[];
+  /** Kinds of business the owner will not run. */
+  never: string[];
+  /** Seeds the factory's own draw of territories, so it can be reproduced. */
+  seed: string | null;
   onboardedAt: number | null;
 }
 
 export const DEFAULT_SETTINGS: FactorySettings = {
   country: null, region: null, budgetCents: 0, companyCapCents: 0,
   approvals: { launch: "ask", spendOverCents: 2_500, kill: "tell" },
+  hunches: [], never: [], seed: null,
   onboardedAt: null,
 };
 

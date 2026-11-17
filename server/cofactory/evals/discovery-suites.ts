@@ -1,3 +1,4 @@
+import { drawTerritories } from "../discovery/territories.ts";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -233,4 +234,34 @@ function seedSignal(discovery: Discovery, index: number): string {
   return signal.id;
 }
 
-export const DISCOVERY_SUITES: readonly Suite[] = [signalSuite(), nicheRuleSuite(), divergenceSuite()];
+/**
+ * Factories whose owners gave no starting point: each draws its own territories, and across 200 of them two should
+ * rarely share one, every draw should span several sectors, and a factory's draw should never repeat what it avoids.
+ */
+export function territorySuite(): Suite {
+  return {
+    name: "territories",
+    async run() {
+      const factories = Array.from({ length: 200 }, (_, index) => drawTerritories(`factory-${index}`, 6).map((territory) => territory.code));
+      let shared = 0, pairs = 0;
+      for (let a = 0; a < factories.length; a++) for (let b = a + 1; b < factories.length; b++) {
+        pairs++;
+        if (factories[a]!.some((code) => factories[b]!.includes(code))) shared++;
+      }
+      const sharedShare = shared / pairs;
+      const narrowest = Math.min(...factories.map((codes) => new Set(codes.map((code) => code.slice(0, 2))).size));
+      const again = drawTerritories("factory-0", 6, new Set(factories[0]));
+      const repeats = again.filter((territory) => factories[0]!.includes(territory.code)).length;
+      const stable = drawTerritories("factory-7", 6).map((territory) => territory.code).join() === factories[7]!.join();
+      const failures = [
+        ...(sharedShare > 0.06 ? [`${(sharedShare * 100).toFixed(1)}% of factory pairs share a territory`] : []),
+        ...(narrowest < 5 ? [`a draw spans only ${narrowest} sectors`] : []),
+        ...(repeats ? [`${repeats} avoided territories drawn again`] : []),
+        ...(stable ? [] : ["the same seed drew different territories"]),
+      ];
+      return { name: "territories", pass: failures.length === 0, metrics: { shared_pair_share: Number(sharedShare.toFixed(4)), narrowest_sectors: narrowest, repeats }, failures };
+    },
+  };
+}
+
+export const DISCOVERY_SUITES: readonly Suite[] = [signalSuite(), nicheRuleSuite(), divergenceSuite(), territorySuite()];

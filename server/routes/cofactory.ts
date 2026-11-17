@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 
 import { z } from "zod";
@@ -21,6 +22,7 @@ import type { Rails } from "../cofactory/validation/rails.ts";
 import type { Sprints } from "../cofactory/validation/sprints.ts";
 import type { Orders } from "../cofactory/validation/orders.ts";
 import type { Settings } from "../cofactory/settings.ts";
+import { drawTerritories, territoryCode, territoryText } from "../cofactory/discovery/territories.ts";
 import { PROFILE_FIELDS } from "../../shared/cofactory/discovery.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
@@ -66,6 +68,11 @@ function lastEvalRun(file: string | undefined): { pass: boolean; at: string; fai
 }
 
 /** The owner's view and controls: deposits, seats, launches, revenue, the kill switch, and the ops board and traces. */
+const COUNTRY_NAMES: Record<string, string> = {
+  US: "United States", CA: "Canada", GB: "United Kingdom", IE: "Ireland", AU: "Australia", NZ: "New Zealand", DE: "Germany", FR: "France",
+  NL: "Netherlands", BE: "Belgium", ES: "Spain", IT: "Italy", IN: "India",
+};
+
 export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
   const now = deps.now ?? Date.now;
   return async (ctx: RouteContext): Promise<typeof PASS | void> => {
@@ -222,6 +229,7 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
         budgetCents: z.number().int().min(0).max(100_000_000).optional(), companyCapCents: z.number().int().min(0).max(100_000_000).optional(),
         approvals: z.object({ launch: z.enum(["ask", "auto"]).optional(), spendOverCents: z.number().int().min(0).max(10_000_000).optional(), kill: z.enum(["ask", "tell"]).optional() }).optional(),
         onboarded: z.boolean().optional(),
+        hunches: z.array(z.string().trim().min(3).max(300)).max(3).optional(), never: z.array(z.string().trim().min(2).max(300)).max(20).optional(),
       }));
       if (!input) return;
       const { onboarded, ...patch } = input;
@@ -256,6 +264,30 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
       record(null, "select_dossiers", `${selected.length} niches`);
       if (selected.length) void deps.tick();
       return json(res, 200, { ok: true, selected });
+    }
+    if (path === "/api/cofactory/factory/open" && deps.settings) {
+      if (!runtime?.launcher) return json(res, 503, { error: "the runtime is not running" });
+      const discovery = deps.discovery();
+      let settings = deps.settings.get();
+      if (!settings.seed) settings = deps.settings.set({ seed: randomUUID() });
+      const existing = discovery.profile();
+      let territories = (existing?.inputs ?? []).filter((input) => territoryCode(input.text) !== null).map((input) => input.text);
+      if (!existing || !existing.inputs.some((input) => input.field === "domains")) {
+        territories = drawTerritories(settings.seed!, 6).map(territoryText);
+        const where = [settings.region, settings.country ? COUNTRY_NAMES[settings.country] ?? settings.country : null].filter(Boolean).join(", ");
+        const set = discovery.setProfile({
+          inputs: [...territories.map((text) => ({ field: "domains" as const, text })), ...(where ? [{ field: "geography" as const, text: where }] : [])],
+          constraints: settings.never, seedNiches: settings.hunches,
+        });
+        if (!set.ok) return json(res, 400, { error: set.reason });
+        record(null, "territories", territories.join("; "));
+      }
+      const staffed = await runtime.launcher.staffFactory();
+      const batch = discovery.store.openBatch() ? null : discovery.startBatch("the factory's first search");
+      if (batch?.ok) void deps.tick();
+      deps.settings.set({ onboardedAt: settings.onboardedAt ?? now() });
+      record(null, "factory_open", `${staffed.length} seats, ${territories.length} territories`);
+      return json(res, 200, { ok: true, staffed, territories });
     }
     if (path === "/api/cofactory/factory/staff") {
       if (!runtime?.launcher) return json(res, 503, { error: "the runtime is not running" });

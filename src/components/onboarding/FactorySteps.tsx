@@ -1,15 +1,13 @@
-// Cofactory's own first-run screens, in the walkthrough's frame: what the owner knows (written by their own AI), the
-// profile it becomes, the stake, what needs their OK, and the factory opening with its first crew.
+// Cofactory's own first-run screens, in the walkthrough's frame: only what the factory cannot work out for itself (where
+// the owner is based, the stake, what needs their OK, an optional hunch), then the factory opening with its first crew.
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { X } from "../../icons";
 import { cn } from "@/lib/cn";
 import { friendlyError } from "@/lib/plain-error";
-import { GROUP_LABELS, GROUP_ORDER, PROFILE_PROMPT, inputCount, profileBody, readProfile, type ProfileDraft, type ProfileGroup } from "@/lib/factory-profile";
 import { api } from "@/state/store";
 import { MausAvatar } from "../Avatar";
 import { Toggle } from "../ui/Toggle";
-import { BringScene } from "./BringStep";
 import { PRIMARY, QUIET, SECONDARY, StepArt, StepFrame, TILE } from "./FunnelSteps";
 
 const MIN_STAKE_CENTS = 2_500;
@@ -19,49 +17,6 @@ const FIELD = "min-h-10 w-full rounded-xl bg-ink/[0.05] px-3 text-[14px] leading
 
 function ErrorLine({ text }: { text: string | null }) {
   return text ? <p role="alert" className="text-[13px] leading-[18px] text-danger">{text}</p> : null;
-}
-
-/** "Bring what you know": the owner's own AI writes the factory profile from what it already knows about them. */
-export function KnowStep({ onNext }: { onNext: (draft: ProfileDraft | null) => void }) {
-  const [copied, setCopied] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [pasted, setPasted] = useState("");
-  const draft = pasted ? readProfile(pasted) : null;
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(PROFILE_PROMPT); setCopied(true); } catch { setOpen(true); }
-  };
-  return (
-    <StepFrame art={<BringScene />} title="Bring what you know"
-      sub="Your AI already knows what you're good at. It writes your factory profile in one answer."
-      footer={<>
-        <button type="button" data-primary="" data-know-next="" onClick={() => onNext(draft)} className={PRIMARY}>Continue</button>
-        {!draft && <button type="button" data-know-skip="" onClick={() => onNext(null)} className={QUIET}>I'll fill it in myself</button>}
-      </>}>
-      <div className="w-full max-w-[440px] rounded-[20px] bg-ink/[0.035] p-4 text-start">
-        <ol className="flex flex-col gap-3 text-[14px] leading-5 text-ink-secondary">
-          {["Copy the prompt.", "Paste it into ChatGPT, Claude, Gemini or any other AI you use.", "Paste its answer below."].map((line, index) => (
-            <li key={line} className="flex items-start gap-3">
-              <span className="grid size-6 shrink-0 place-items-center rounded-full bg-ink/[0.06] text-[12px] text-ink-secondary">{index + 1}</span>
-              <span className="pt-0.5">{line}</span>
-            </li>
-          ))}
-        </ol>
-        <div className="mt-4 flex items-center gap-2 ps-9">
-          <button type="button" data-know-copy="" onClick={() => void copy()} className="ui-button ui-button-pill min-h-9 bg-ink/[0.07] px-4 hover:bg-ink/[0.11]">{copied ? "Copied" : "Copy the prompt"}</button>
-          <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className={QUIET}>{open ? "Hide the prompt" : "See the prompt"}</button>
-        </div>
-        {open && <pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap rounded-xl bg-app p-3 text-[12px] leading-[18px] text-ink-secondary">{PROFILE_PROMPT}</pre>}
-        <textarea data-know-paste="" value={pasted} rows={3} placeholder="Paste the answer here"
-          onPaste={(event) => event.stopPropagation()} onChange={(event) => setPasted(event.target.value)}
-          className={cn(FIELD, "mt-4 resize-none py-2.5")} />
-        {pasted && (
-          <p role="status" className="mt-2 text-[13px] leading-[18px] text-ink-secondary">
-            {draft ? `Read ${inputCount(draft)} things about you. You can edit them next.` : "That doesn't have the profile block in it yet. Paste the whole answer."}
-          </p>
-        )}
-      </div>
-    </StepFrame>
-  );
 }
 
 function ChipList({ items, onRemove }: { items: string[]; onRemove: (index: number) => void }) {
@@ -107,63 +62,74 @@ const COUNTRIES: Array<[string, string]> = [
   ["DE", "Germany"], ["FR", "France"], ["NL", "Netherlands"], ["BE", "Belgium"], ["ES", "Spain"], ["IT", "Italy"], ["IN", "India"],
 ];
 
-/** The profile the scout searches from, as editable chips, and where the owner operates (which sets the outreach rules). */
-export function ProfileStep({ draft, onChange, country, region, onNext }: {
-  draft: ProfileDraft;
-  onChange: (draft: ProfileDraft) => void;
-  country: string | null;
-  region: string | null;
-  onNext: () => void;
-}) {
+/** Where the owner is based: their companies are theirs, so this sets which rules for outreach, payments and tax apply. */
+export function WhereStep({ country, region, onNext }: { country: string | null; region: string | null; onNext: () => void }) {
   const [where, setWhere] = useState(country ?? "");
   const [state, setState] = useState(region ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const setGroup = (group: ProfileGroup, items: string[]) => onChange({ ...draft, groups: { ...draft.groups, [group]: items } });
-  const ready = inputCount(draft) >= 1 && where !== "";
   const save = async () => {
     setBusy(true);
     setError(null);
     try {
-      await api("/api/cofactory/profile", { method: "POST", body: JSON.stringify(profileBody(draft)) });
       await api("/api/cofactory/settings", { method: "POST", body: JSON.stringify({ country: where, region: state.trim() || null }) });
       onNext();
     } catch (cause) {
-      setError(friendlyError(cause, "Couldn't save your profile. Try again."));
+      setError(friendlyError(cause, "Couldn't save that. Try again."));
     } finally {
       setBusy(false);
     }
   };
   return (
-    <StepFrame art={<StepArt art="notebook" />} title="Your profile" wide
-      sub="Your scout searches from what's unusual about you, so niches stay yours. Change anything."
+    <StepFrame art={<StepArt art="map" />} title="Where are you based?"
+      sub="Your companies are yours, so they follow your country's rules for contacting people, taking payments and tax."
       footer={<>
         <ErrorLine text={error} />
-        <button type="button" data-primary="" data-profile-next="" disabled={!ready || busy} onClick={() => void save()} className={PRIMARY}>Continue</button>
-        {!ready && <p className="text-[12px] leading-4 text-ink-tertiary">Add at least one thing you know, and where you operate.</p>}
+        <button type="button" data-primary="" data-where-next="" disabled={!where || busy} onClick={() => void save()} className={PRIMARY}>Continue</button>
       </>}>
-      <div className="flex w-full flex-col gap-5">
-        <div className="grid grid-cols-1 gap-3 text-start sm:grid-cols-[2fr_1fr]">
-          <label className="flex flex-col gap-2">
-            <span className="text-[13px] font-medium leading-[18px] text-ink">Where you operate</span>
-            <select data-profile-country="" value={where} onChange={(event) => setWhere(event.target.value)} className={FIELD}>
-              <option value="">Choose a country</option>
-              {COUNTRIES.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
-            </select>
-          </label>
-          {(where === "US" || where === "CA" || where === "AU") && (
-            <label className="flex flex-col gap-2">
-              <span className="text-[13px] font-medium leading-[18px] text-ink">{where === "CA" ? "Province" : "State"}</span>
-              <input value={state} onChange={(event) => setState(event.target.value)} placeholder={where === "US" ? "Ohio" : ""} className={FIELD} />
-            </label>
-          )}
-        </div>
-        {GROUP_ORDER.map((group) => (
-          <ChipField key={group} title={GROUP_LABELS[group].title} hint={GROUP_LABELS[group].hint} items={draft.groups[group]} onChange={(items) => setGroup(group, items)} />
-        ))}
-        <ChipField title="Hard no's" hint="Anything with medical advice" items={draft.constraints} onChange={(items) => onChange({ ...draft, constraints: items })} />
-        <ChipField title="Hunches to look into first (optional, up to 3)" hint="DIR fee recovery for one-store pharmacies" max={3}
-          items={draft.seedNiches} onChange={(items) => onChange({ ...draft, seedNiches: items })} />
+      <div className="flex w-full max-w-[440px] flex-col gap-3 text-start">
+        <select data-where-country="" aria-label="Country" value={where} onChange={(event) => setWhere(event.target.value)} className={FIELD}>
+          <option value="">Choose a country</option>
+          {COUNTRIES.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
+        </select>
+        {(where === "US" || where === "CA" || where === "AU") && (
+          <input aria-label={where === "CA" ? "Province" : "State"} value={state} onChange={(event) => setState(event.target.value)}
+            placeholder={where === "CA" ? "Province" : "State"} className={FIELD} />
+        )}
+      </div>
+    </StepFrame>
+  );
+}
+
+/** Optional: somewhere the owner wants the scout to look first, and kinds of business they will never run. */
+export function HunchStep({ hunches, never, onNext }: { hunches: string[]; never: string[]; onNext: () => void }) {
+  const [first, setFirst] = useState(hunches);
+  const [no, setNo] = useState(never);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api("/api/cofactory/settings", { method: "POST", body: JSON.stringify({ hunches: first, never: no }) });
+      onNext();
+    } catch (cause) {
+      setError(friendlyError(cause, "Couldn't save that. Try again."));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <StepFrame art={<StepArt art="binoculars" />} title="Anything in mind?"
+      sub="Your scout finds niches on its own. If you want it to look somewhere first, or never go somewhere, say so. Most people skip this."
+      footer={<>
+        <ErrorLine text={error} />
+        <button type="button" data-primary="" data-hunch-next="" disabled={busy} onClick={() => void save()} className={PRIMARY}>Continue</button>
+        {!first.length && !no.length && <button type="button" data-hunch-skip="" onClick={onNext} className={QUIET}>Skip</button>}
+      </>}>
+      <div className="flex w-full max-w-[440px] flex-col gap-5">
+        <ChipField title="Look here first (up to 3)" hint="Billing for one-store pharmacies" max={3} items={first} onChange={setFirst} />
+        <ChipField title="Never run" hint="Anything with medical advice" items={no} onChange={setNo} />
       </div>
     </StepFrame>
   );
@@ -291,10 +257,10 @@ export function ApprovalsStep({ approvals, emails, onNext }: { approvals: Approv
   );
 }
 
-type Opening = { kind: "staffing" } | { kind: "open"; scoutId: string | null; leadId: string | null } | { kind: "failed"; why: string };
+type Opening = { kind: "staffing" } | { kind: "open"; scoutId: string | null; leadId: string | null; territories: string[] } | { kind: "failed"; why: string };
 
-/** The factory opens: its lead and scout arrive, and the scout's first search starts in the owner's own fields. */
-export function OpeningStep({ firstField, onDone }: { firstField: string | null; onDone: (botId: string | null) => void }) {
+/** The factory opens: it picks where to start looking, its lead and scout arrive, and the scout's first search begins. */
+export function OpeningStep({ onDone }: { onDone: (botId: string | null) => void }) {
   const reduced = useReducedMotion() === true;
   const [state, setState] = useState<Opening>({ kind: "staffing" });
   const [here, setHere] = useState(0);
@@ -302,11 +268,9 @@ export function OpeningStep({ firstField, onDone }: { firstField: string | null;
   const open = async () => {
     setState({ kind: "staffing" });
     try {
-      const staffed = await api<{ staffed: Array<{ role: string; botId: string }> }>("/api/cofactory/factory/staff", { method: "POST", body: "{}" });
-      await api("/api/cofactory/discovery/batches", { method: "POST", body: JSON.stringify({ note: "first batch, opened by the first run" }) }).catch(() => {});
-      await api("/api/cofactory/settings", { method: "POST", body: JSON.stringify({ onboarded: true }) });
-      const of = (role: string) => staffed.staffed.find((seat) => seat.role === role)?.botId ?? null;
-      setState({ kind: "open", scoutId: of("scout"), leadId: of("lead") });
+      const opened = await api<{ staffed: Array<{ role: string; botId: string }>; territories: string[] }>("/api/cofactory/factory/open", { method: "POST", body: "{}" });
+      const of = (role: string) => opened.staffed.find((seat) => seat.role === role)?.botId ?? null;
+      setState({ kind: "open", scoutId: of("scout"), leadId: of("lead"), territories: opened.territories.map((text) => text.replace(/\s*\(NAICS \d{6}\)$/, "")) });
     } catch (cause) {
       setState({ kind: "failed", why: friendlyError(cause, "Your factory couldn't open.") });
     }
@@ -318,8 +282,7 @@ export function OpeningStep({ firstField, onDone }: { firstField: string | null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    if (state.kind !== "open") return;
-    if (here >= 2) return;
+    if (state.kind !== "open" || here >= 2) return;
     const timer = setTimeout(() => setHere((count) => count + 1), reduced ? 0 : 450);
     return () => clearTimeout(timer);
   }, [state.kind, here, reduced]);
@@ -339,11 +302,18 @@ export function OpeningStep({ firstField, onDone }: { firstField: string | null;
         </div>
       }
       title={state.kind === "failed" ? "Your factory didn't open" : done ? "Your factory is open" : "Opening your factory"}
-      sub={state.kind === "failed" ? state.why : done
-        ? `Your scout is already looking${firstField ? ` in ${firstField}` : ""}. You'll see what it finds as it finds it.`
-        : `${Math.min(here, 2)} of 2 here`}
+      sub={state.kind === "failed" ? state.why : done ? "Your scout picked where to start and is already looking. You'll see what it finds as it finds it." : `${Math.min(here, 2)} of 2 here`}
       footer={state.kind === "failed"
         ? <button type="button" data-primary="" onClick={() => void open()} className={PRIMARY}>Try again</button>
-        : <button type="button" data-primary="" data-opening-done="" disabled={!done} onClick={() => onDone(state.kind === "open" ? state.scoutId ?? state.leadId : null)} className={done ? PRIMARY : SECONDARY}>Meet your scout</button>} />
+        : <button type="button" data-primary="" data-opening-done="" disabled={!done} onClick={() => onDone(state.kind === "open" ? state.scoutId ?? state.leadId : null)} className={done ? PRIMARY : SECONDARY}>Meet your scout</button>}>
+      {done && state.kind === "open" && state.territories.length > 0 && (
+        <ul data-opening-territories="" className="flex w-full max-w-[440px] flex-col gap-1.5">
+          {state.territories.slice(0, 3).map((territory) => (
+            <li key={territory} className={cn(ROW, "min-h-11 text-[14px] leading-5 text-ink")}>{territory}</li>
+          ))}
+          {state.territories.length > 3 && <li className="text-[13px] leading-[18px] text-ink-tertiary">{`Plus ${state.territories.length - 3} more`}</li>}
+        </ul>
+      )}
+    </StepFrame>
   );
 }

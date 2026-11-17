@@ -17,7 +17,7 @@ const ONLINE: { key: string; tile: string; mark: (size: number) => ReactNode }[]
 ];
 
 /** Your other AI apps on the left, in their own colours, dusk bot's mascot on the right as the welcome shows it. */
-export function BringScene() {
+function BringScene() {
   return (
     <div data-bring-scene="" className="relative flex h-16 w-[248px] items-center justify-between">
       <span className="grid h-[52px] w-[52px] shrink-0 grid-cols-2 gap-1">

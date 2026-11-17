@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent 
 import { setEmailGateDone, track } from "@/lib/analytics";
 import { openExternalLink } from "@/lib/app-links";
 import { cofactoryEnabled, phoneAppEnabled } from "@/lib/feature-flags";
-import { draftFromProfile, emptyDraft, GROUP_ORDER, type ProfileDraft } from "@/lib/factory-profile";
 import { cn } from "@/lib/cn";
 import { chiefFor, chiefStepFits, createChiefPatch, myDefaultBot, stageIntro, useViewerEmail } from "@/lib/default-bot";
 import { completionPatch, computerAiIds, DEFAULT_ADMIN_ORIGIN, firstRunPatch, markWelcomeFinished, resumeBeat, showWelcome, type BeatId } from "@/lib/onboarding";
@@ -24,7 +23,7 @@ import { CloudBringStep, useCloudBringOffered } from "./CloudBringStep";
 import { funnelSteps, nextStep, previousStep, type FunnelPath, type FunnelStep } from "./funnel";
 import { funnelAccount, type FunnelAccountState } from "./funnel-account";
 import { FunnelBar, PhoneStep, PlaceStep, WelcomeStep } from "./FunnelSteps";
-import { ApprovalsStep, KnowStep, OpeningStep, ProfileStep, StakeStep, type Approvals } from "./FactorySteps";
+import { ApprovalsStep, HunchStep, OpeningStep, StakeStep, WhereStep, type Approvals } from "./FactorySteps";
 import { MakingStep } from "./MakingStep";
 import { PermissionsStep } from "./PermissionsStep";
 import { useWelcomeAi } from "./welcome-ai";
@@ -36,8 +35,7 @@ type Config = ReturnType<typeof useStore>["state"]["config"];
 
 /** What the factory already has, read once so a resumed or replayed first run starts from it. */
 interface FactoryKnown {
-  settings: { country: string | null; region: string | null; budgetCents: number; companyCapCents: number; approvals: Approvals };
-  profile: { inputs: Array<{ field: string; text: string }>; constraints: string[]; seedNiches: string[] } | null;
+  settings: { country: string | null; region: string | null; budgetCents: number; companyCapCents: number; approvals: Approvals; hunches: string[]; never: string[] };
   relatedParties: { emails: string[]; domains: string[] };
 }
 
@@ -157,13 +155,9 @@ export function WelcomeFlow({
   const factory = cofactoryEnabled() && !embedded && !cloudHome;
   const notify = Boolean(macAccess) && (firstAccess === undefined || (firstAccess?.supported === true && firstAccess.notifications !== "granted"));
   const [factoryKnown, setFactoryKnown] = useState<FactoryKnown | null>(null);
-  const [profileDraft, setProfileDraft] = useState<ProfileDraft>(emptyDraft);
   useEffect(() => {
     if (!factory) return;
-    void api<FactoryKnown>("/api/cofactory/settings").then((known) => {
-      setFactoryKnown(known);
-      if (known.profile) setProfileDraft(draftFromProfile(known.profile));
-    }, () => {});
+    void api<FactoryKnown>("/api/cofactory/settings").then(setFactoryKnown, () => {});
   }, [factory]);
   const [notesLine, setNotesLine] = useState<string | null>(null);
 
@@ -306,7 +300,7 @@ export function WelcomeFlow({
       // Escape is "not now": past an optional step, never past an account the app needs
       if (at === "account" && known?.required) return;
       if (at === "welcome" || at === "account" || at === "place" || at === "checkout" || at === "making") return;
-      if (at === "profile" || at === "stake" || at === "approvals" || at === "opening") return;
+      if (at === "where" || at === "stake" || at === "approvals" || at === "opening") return;
       next();
       return;
     }
@@ -339,11 +333,11 @@ export function WelcomeFlow({
     case "phone":
       body = <PhoneStep onNext={next} copy={factory ? FACTORY_COPY.phone : undefined} />;
       break;
-    case "know":
-      body = <KnowStep onNext={(draft) => { if (draft) setProfileDraft(draft); track("onboarding_know", { action: draft ? "imported" : "manual" }); next(); }} />;
+    case "where":
+      body = <WhereStep country={factoryKnown?.settings.country ?? null} region={factoryKnown?.settings.region ?? null} onNext={next} />;
       break;
-    case "profile":
-      body = <ProfileStep draft={profileDraft} onChange={setProfileDraft} country={factoryKnown?.settings.country ?? null} region={factoryKnown?.settings.region ?? null} onNext={next} />;
+    case "hunch":
+      body = <HunchStep hunches={factoryKnown?.settings.hunches ?? []} never={factoryKnown?.settings.never ?? []} onNext={next} />;
       break;
     case "stake":
       body = <StakeStep budgetCents={factoryKnown?.settings.budgetCents ?? 0} capCents={factoryKnown?.settings.companyCapCents ?? 0} onNext={next} />;
@@ -359,7 +353,7 @@ export function WelcomeFlow({
         onNext={(how, granted) => { track("onboarding_permissions", { action: how, granted }); next(); }} /> : null;
       break;
     case "opening":
-      body = <OpeningStep firstField={GROUP_ORDER.map((group) => profileDraft.groups[group][0]).find(Boolean) ?? null} onDone={(botId) => void finish("completed", botId)} />;
+      body = <OpeningStep onDone={(botId) => void finish("completed", botId)} />;
       break;
     case "making":
       body = <MakingStep onOpened={() => void finish("completed", null)} />;
