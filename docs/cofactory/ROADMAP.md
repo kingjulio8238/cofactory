@@ -739,6 +739,11 @@ owner sees it in `/api/cofactory/state`.
   month free", "on us"). A money-back guarantee and a free call are still allowed.
 - The drafts also wrote their own opt-out line. The tool now says the opt-out line and the postal address are added
   for the writer.
+- **The lead claimed actions it never took.** Its summaries said "escalated it to the owner", "corrected the owner" and
+  "owner notified", but it sent the owner nothing; its only sends went to the CEO and the scout. Now `unbackedClaims`
+  makes `cofactory_journal` and `cofactory_end_session` refuse any claim of having messaged a seat or the owner when no
+  typed message went from that seat to that role this session. Requests ("the CEO asked me to escalate") and plans
+  ("will escalate") pass.
 
 The `outreach-gate` eval grew to 30 cases:
 - postal address on first and follow-up emails;

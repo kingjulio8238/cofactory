@@ -89,6 +89,30 @@ export interface ToolContext {
   session?: Session | null;
 }
 
+const ADDRESSEES = "owner|ceo|lead|scout|builder|marketer|seller|operator";
+const SENT_TO = new RegExp(`\\b(?:escalated|sent|reported|wrote|forwarded|passed)\\b(?:\\s+(?:it|this|that|them|these|the \\w+|a \\w+|an \\w+))?\\s+(?:up\\s+)?to\\s+the\\s+(?:factory\\s+)?(${ADDRESSEES})\\b`, "gi");
+const NOTIFIED = new RegExp(`\\b(?:the\\s+)?(?:factory\\s+)?(${ADDRESSEES})\\s+(?:was\\s+|has been\\s+)?(?:notified|alerted)\\b(?!\\s+(?:me|us)\\b)`, "gi");
+const TOLD = new RegExp(`\\b(?:told|asked|notified|informed|messaged|alerted|corrected|pinged|updated)\\s+the\\s+(?:factory\\s+)?(${ADDRESSEES})\\b`, "gi");
+
+/**
+ * Claims in a seat's own words that it messaged someone this session ("escalated it to the owner", "told the CEO")
+ * with no typed message from it to that role since the session began. A summary must not report work that was not done.
+ */
+export function unbackedClaims(text: string, sentTo: ReadonlySet<string>): string[] {
+  const firstPerRole = new Map<string, string>();
+  for (const match of [...text.matchAll(SENT_TO), ...text.matchAll(TOLD), ...text.matchAll(NOTIFIED)].sort((x, y) => x.index! - y.index!)) {
+    const role = match[1]!.toLowerCase();
+    if (!sentTo.has(role) && !firstPerRole.has(role)) firstPerRole.set(role, match[0]);
+  }
+  return [...firstPerRole.entries()]
+    .map(([role, phrase]) => `you wrote "${phrase}" but sent no message to the ${role} this session; send it with cofactory_send (to_role "${role}") or say what you actually did`);
+}
+
+function sentThisSession(ctx: ToolContext): Set<string> {
+  const since = ctx.session?.startedAt ?? 0;
+  return new Set(ctx.book.messagesAfter(0).filter(({ message }) => message.fromBotId === ctx.seat.botId && message.at >= since).map(({ message }) => message.toRole));
+}
+
 /** Files a gate decision with its evidence and the cost it was made at. */
 function decide(ctx: ToolContext, kind: DecisionKind, verdict: "allowed" | "refused", reason: string, evidence: EvidenceLink[], companyId: string | null = ctx.seat.companyId): void {
   ctx.observe?.decide({ companyId, session: ctx.session ?? null, actor: ctx.actor, kind, verdict, reason, evidence });
@@ -201,8 +225,11 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     description: "Write this session's journal entry: what you did, what you learned, what comes next, and what blocks you. Every later session starts from the journal, not from this chat, so write what the next session needs. Required before cofactory_end_session.",
     roles: ALL,
     input: z.object({ did: z.string().min(1).max(4_000), learned: z.string().max(4_000).default(""), next: z.string().max(2_000).default(""), blockers: z.string().max(2_000).default("") }),
-    run(args, { seat, sessions }) {
+    run(args, ctx) {
+      const { seat, sessions } = ctx;
       if (!sessions) return refused("the runtime is not running");
+      const unbacked = unbackedClaims(args.did, sentThisSession(ctx));
+      if (unbacked.length) return refused(unbacked.join("; "));
       return ok({ entry: sessions.journal(seat, args) });
     },
   }),
@@ -220,6 +247,8 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
       const { seat, sessions, now } = ctx;
       if (!sessions) return refused("the runtime is not running");
       if (args.outcome === "waiting" && (!args.waiting_on?.trim() || args.wake_in_hours === undefined)) return refused("waiting needs waiting_on (what you wait for) and wake_in_hours");
+      const unbacked = unbackedClaims(args.summary, sentThisSession(ctx));
+      if (unbacked.length) return refused(unbacked.join("; "));
       const summary = args.outcome === "waiting" ? `${args.summary} (waiting on: ${args.waiting_on})` : args.summary;
       const nextWakeAt = args.wake_in_hours === undefined ? null : (now ?? Date.now)() + args.wake_in_hours * 60 * 60_000;
       const ended = sessions.requestEnd(seat, { outcome: args.outcome, summary, nextWakeAt });
