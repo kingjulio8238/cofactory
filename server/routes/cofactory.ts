@@ -4,6 +4,9 @@ import { COMPANY_ROLES, FACTORY_ROLES, KILL_REASONS } from "../../shared/cofacto
 import type { RequestAuth } from "../request-auth.ts";
 import type { Book } from "../cofactory/book.ts";
 import type { Truth } from "../cofactory/truth/store.ts";
+import type { Launcher } from "../cofactory/runtime/launcher.ts";
+import type { Sessions } from "../cofactory/runtime/sessions.ts";
+import type { RuntimeStore } from "../cofactory/runtime/store.ts";
 import { EVENT_KINDS } from "../../shared/cofactory/evidence.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
@@ -12,11 +15,13 @@ const seat = z.union([
   z.object({ botId: z.string().min(1), role: z.enum(FACTORY_ROLES), companyId: z.null().default(null) }),
   z.object({ botId: z.string().min(1), role: z.enum(COMPANY_ROLES), companyId: z.string().min(1) }),
 ]);
-const COMPANY_ACTION = /^\/api\/cofactory\/companies\/([\w-]+)\/(freeze|unfreeze|kill)$/;
+const COMPANY_ACTION = /^\/api\/cofactory\/companies\/([\w-]+)\/(freeze|unfreeze|kill|wake)$/;
 
 export interface CofactoryRouteDeps {
   books: () => Book;
   evidence: () => Truth;
+  runtime: () => { store: RuntimeStore; sessions: Sessions; launcher: Launcher | undefined } | null;
+  tick: () => Promise<void>;
   owner: (auth: RequestAuth) => boolean;
   botExists: (botId: string) => boolean;
 }
@@ -28,12 +33,29 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
     if (!path.startsWith("/api/cofactory/")) return PASS;
     if (!deps.owner(ctx.auth)) return json(res, 403, { error: "only the owner runs the factory" });
     const book = deps.books();
+    const runtime = deps.runtime();
     if (method === "GET" && path === "/api/cofactory/state") {
       return json(res, 200, {
         unallocatedCents: book.balance("unallocated"), reserveCents: book.balance("reserve"), policy: book.policy,
         companies: book.companies().map((c) => ({ ...c, availableCents: book.available(c.id) })),
         members: book.members(), recommendations: book.audit(), ownerInbox: book.inbox("owner", null),
+        runtime: runtime ? {
+          liveSessions: runtime.store.liveSessions(), alarms: runtime.store.openAlarms(),
+          recentSessions: [null, ...book.companies().map((c) => c.id)].flatMap((id) => runtime.store.sessionsFor(id, 5)),
+        } : null,
       });
+    }
+    if (method === "GET" && path === "/api/cofactory/journal") {
+      if (!runtime) return json(res, 503, { error: "the runtime is not running" });
+      const companyId = ctx.url.searchParams.get("company");
+      return json(res, 200, { entries: runtime.store.journal(companyId || null, 100) });
+    }
+    if (method === "GET" && path.startsWith("/api/cofactory/sessions/")) {
+      if (!runtime) return json(res, 503, { error: "the runtime is not running" });
+      const id = path.slice("/api/cofactory/sessions/".length);
+      const session = runtime.store.session(id);
+      if (!session) return json(res, 404, { error: "no such session" });
+      return json(res, 200, { session, events: runtime.store.sessionEvents(id) });
     }
     if (method === "GET" && path === "/api/cofactory/ledger") {
       const companyId = ctx.url.searchParams.get("company") ?? undefined;
@@ -65,9 +87,15 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
       catch (error) { return json(res, 409, { ok: false, reason: error instanceof Error ? error.message : String(error) }); }
     }
     if (path === "/api/cofactory/launch") {
-      const input = parse(z.object({ name: z.string().min(1).max(120), brief: z.string().min(1).max(4_000), capCents: cents }));
-      if (input) return answer(book.launch(input, "owner"));
-      return;
+      const input = parse(z.object({ name: z.string().min(1).max(120), brief: z.string().min(1).max(4_000), capCents: cents, team: z.boolean().default(true) }));
+      if (!input) return;
+      const launch = { name: input.name, brief: input.brief, capCents: input.capCents };
+      if (input.team && runtime?.launcher) {
+        const launched = await runtime.launcher.launch(launch, "owner");
+        if (launched.ok) void deps.tick();
+        return answer(launched);
+      }
+      return answer(book.launch(launch, "owner"));
     }
     if (path === "/api/cofactory/seats") {
       const input = parse(seat);
@@ -99,11 +127,22 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
     }
     const action = COMPANY_ACTION.exec(path);
     if (action) {
-      const [, companyId, verb] = action as unknown as [string, string, "freeze" | "unfreeze" | "kill"];
+      const [, companyId, verb] = action as unknown as [string, string, "freeze" | "unfreeze" | "kill" | "wake"];
       if (verb === "unfreeze") return answer(book.unfreeze(companyId, "owner"));
+      if (verb === "wake") {
+        if (!runtime) return json(res, 503, { error: "the runtime is not running" });
+        const ceo = book.members().find((member) => member.companyId === companyId && member.role === "ceo");
+        if (!ceo) return json(res, 409, { ok: false, reason: "no CEO is seated" });
+        const input = parse(z.object({ objective: z.string().min(1).max(2_000), doneWhen: z.string().min(1).max(1_000), kind: z.enum(["operating", "deep"]).default("operating") }));
+        if (!input) return;
+        const started = await runtime.sessions.request({ companyId, botId: ceo.botId, kind: input.kind, trigger: "owner", objective: input.objective, doneWhen: input.doneWhen });
+        return "refused" in started ? json(res, 409, { ok: false, reason: started.refused }) : json(res, 200, { ok: true, ...started });
+      }
       const input = parse(z.object({ why: z.string().min(1).max(2_000), reason: z.enum(KILL_REASONS).default("owner") }));
       if (!input) return;
-      return answer(verb === "freeze" ? book.freeze(companyId, "owner", input.why) : book.kill(companyId, input.reason, "owner", input.why));
+      const result = verb === "freeze" ? book.freeze(companyId, "owner", input.why) : book.kill(companyId, input.reason, "owner", input.why);
+      if (result.ok) await runtime?.sessions.stopCompany(companyId, `${verb}: ${input.why}`);
+      return answer(result);
     }
     return PASS;
   };

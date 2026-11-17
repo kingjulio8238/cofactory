@@ -367,6 +367,12 @@ export function openBook(file: string, options: BookOptions = {}) {
       return rows.reverse().map(rowToMessage);
     },
 
+    /** Every message after `seq`, oldest first, with its position for a wake cursor. */
+    messagesAfter(seq: number): Array<{ seq: number; message: FactoryMessage }> {
+      return (db.prepare("SELECT * FROM messages WHERE seq > ? ORDER BY seq").all(seq) as Array<Record<string, unknown>>)
+        .map((row) => ({ seq: Number(row.seq), message: rowToMessage(row) }));
+    },
+
     message(id: string): FactoryMessage | null {
       const row = db.prepare("SELECT * FROM messages WHERE id = ?").get(id) as Record<string, unknown> | undefined;
       return row ? rowToMessage(row) : null;

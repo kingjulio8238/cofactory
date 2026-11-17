@@ -15,6 +15,8 @@ import {
 import type { Book } from "./book.ts";
 import { verifyEvidence } from "./truth/gate.ts";
 import type { Truth } from "./truth/store.ts";
+import type { Launcher } from "./runtime/launcher.ts";
+import type { Sessions } from "./runtime/sessions.ts";
 
 export type ToolResult = { content: Array<{ type: "text"; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -43,6 +45,9 @@ export interface ToolContext {
   truth: Truth;
   seat: Membership;
   actor: string;
+  sessions?: Sessions;
+  launcher?: Launcher;
+  now?: () => number;
 }
 
 interface ToolSpec<S extends z.ZodType> {
@@ -129,6 +134,35 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     },
   }),
   spec({
+    name: "cofactory_journal",
+    description: "Write this session's journal entry: what you did, what you learned, what comes next, and what blocks you. Every later session starts from the journal, not from this chat, so write what the next session needs. Required before cofactory_end_session.",
+    roles: ALL,
+    input: z.object({ did: z.string().min(1).max(4_000), learned: z.string().max(4_000).default(""), next: z.string().max(2_000).default(""), blockers: z.string().max(2_000).default("") }),
+    run(args, { seat, sessions }) {
+      if (!sessions) return refused("the runtime is not running");
+      return ok({ entry: sessions.journal(seat, args) });
+    },
+  }),
+  spec({
+    name: "cofactory_end_session",
+    description: "End your current session once its objective is met (done), when you are waiting on something outside (waiting: name it and give wake_in_hours), or when you cannot progress (blocked). The session ends when this turn finishes. Refused until this session has a journal entry.",
+    roles: ALL,
+    input: z.object({
+      outcome: z.enum(["done", "waiting", "blocked"]),
+      summary: z.string().min(1).max(2_000),
+      waiting_on: z.string().max(500).optional(),
+      wake_in_hours: z.number().positive().max(24 * 14).optional(),
+    }),
+    run(args, { seat, sessions, now }) {
+      if (!sessions) return refused("the runtime is not running");
+      if (args.outcome === "waiting" && (!args.waiting_on?.trim() || args.wake_in_hours === undefined)) return refused("waiting needs waiting_on (what you wait for) and wake_in_hours");
+      const summary = args.outcome === "waiting" ? `${args.summary} (waiting on: ${args.waiting_on})` : args.summary;
+      const nextWakeAt = args.wake_in_hours === undefined ? null : (now ?? Date.now)() + args.wake_in_hours * 60 * 60_000;
+      const ended = sessions.requestEnd(seat, { outcome: args.outcome, summary, nextWakeAt });
+      return ended.ok ? ok({ ending: { sessionId: ended.session.id, outcome: args.outcome } }) : refused(ended.reason);
+    },
+  }),
+  spec({
     name: "cofactory_send",
     description: "Send a typed message to another seat. Specialists address their CEO, a CEO addresses its own team or the factory lead, the lead and scout address any company's CEO or each other, and only the lead escalates to the owner. The brief must stand alone.",
     roles: ALL,
@@ -166,11 +200,16 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
   }),
   spec({
     name: "cofactory_launch_company",
-    description: "Launch a company from a scored idea with a hard cap taken from unallocated money. Refused below the minimum stake, past the live-company limit, or beyond unallocated money.",
+    description: "Launch a company from a scored idea with a hard cap taken from unallocated money: its books, its workspace and brief, and a seated team (CEO, builder, marketer). Refused below the minimum stake, past the live-company limit, or beyond unallocated money.",
     roles: ["lead"],
     input: z.object({ name: z.string().min(1).max(120), brief: z.string().min(1).max(4_000), cap_cents: cents }),
-    run(args, { book, actor }) {
-      const result = book.launch({ name: args.name, brief: args.brief, capCents: args.cap_cents }, actor);
+    async run(args, { book, actor, launcher }) {
+      const input = { name: args.name, brief: args.brief, capCents: args.cap_cents };
+      if (launcher) {
+        const launched = await launcher.launch(input, actor);
+        return launched.ok ? ok({ company: launched.company, team: launched.team }) : refused(launched.reason);
+      }
+      const result = book.launch(input, actor);
       return result.ok ? ok({ company: result.company }) : refused(result.reason);
     },
   }),
@@ -189,8 +228,9 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     description: "Stop a company for good: its holds are voided and its remaining money returns to unallocated. Give the reason and what the post-mortem should teach the scout.",
     roles: ["lead"],
     input: z.object({ company_id: z.string().min(1), reason: z.enum(KILL_REASONS), why: z.string().min(1).max(2_000) }),
-    run(args, { book, actor }) {
+    async run(args, { book, actor, sessions }) {
       const result = book.kill(args.company_id, args.reason, actor, args.why);
+      if (result.ok) await sessions?.stopCompany(args.company_id, `killed: ${args.why}`);
       return result.ok ? ok({ company: result.company, releasedCents: result.releasedCents }) : refused(result.reason);
     },
   }),

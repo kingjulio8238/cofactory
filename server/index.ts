@@ -88,7 +88,7 @@ import { keyHint, keyStatus, nestedKeyStatus, withoutKeyHints } from "./key-hint
 import { chartRenderer, compileChart, dataEngine, validateVegaLite } from "./data/deps.ts";
 import { BUILT_IN_DATA_SYSTEM_PROMPT } from "./data/instructions.ts";
 import { DATA_INTERNAL_MCP_PATH, dataRpc } from "./data/rpc.ts";
-import { COFACTORY_INTERNAL_MCP_PATH, createCofactoryHost } from "./cofactory/host.ts"; import { createCofactoryRoutes } from "./routes/cofactory.ts";
+import { COFACTORY_INTERNAL_MCP_PATH, cofactoryPolicyFromEnv, createCofactoryHost } from "./cofactory/host.ts"; import { createCofactoryRoutes } from "./routes/cofactory.ts";
 import { APP_TOKENS_MCP_PREFIX, createTokenApps } from "./app-tokens/service.ts"; import { appActionCard, McpToolHints, toolCallFactsFromSummary } from "./mcp-tool-hints.ts"; import { tokenApp } from "../shared/app-tokens.ts"; import { remoteMcpAppFor } from "./remote-mcp-label.ts"; import { createEmailRoutes } from "./routes/email.ts"; import { createEmailHost, EMAIL_INTERNAL_MCP_PATH } from "./email/host.ts"; import { createEmailService } from "./email/service.ts"; import { createSlackHost } from "./slack/host.ts";
 import { createPhones } from "./host/phones.ts"; import { createDevices } from "./host/devices.ts";
 import { desktopPhonesOffered, NOT_THE_OWNER } from "./phones/owner.ts";
@@ -2454,7 +2454,14 @@ function dataIntegration(botId: string, turn: { threadId: string; generation: st
   };
 }
 const cofactory = createCofactoryHost({ dataDir: DATA_DIR, proxy: { command: process.execPath, script: SPAWNED_PROXIES.harnessMcp, env: AGENTS_NODE_FLAG }, harnessUrl: () => `http://127.0.0.1:${PORT}`, tokenEnv: harnessMcpTokenEnv("cofactory"),
-  mint: (botId, turn) => mintInternalCapability({ botId, ...turn, kind: "cofactory", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 }) });
+  mint: (botId, turn) => mintInternalCapability({ botId, ...turn, kind: "cofactory", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 }),
+  ...(process.env.COFACTORY_RUNTIME === "0" ? {} : { turns: {
+    createThread: (botId: string, title: string) => store.createTask(botId, title, false, undefined, undefined, "full")?.threadId ?? null,
+    start: async (botId: string, threadId: string, prompt: string, onSettled: (result: HostTurnResult) => void) => { await startTurn(botId, prompt, { threadId, automationSource: "schedule", unattended: true, onSettled, onDispatchError: (text) => onSettled({ ok: false, text }) }); },
+    interrupt: async (botId: string, threadId: string) => { cancelDirectTurnDispatch(botId, threadId); revokeInternalCapabilitiesForThread(threadId); await runningTurnInstance(botForThread(botId, threadId), threadId)?.adapter.interruptTurn(threadId); },
+  } }),
+  createBot: async ({ name, instructions, section }) => { const bot = store.createBot({ name, soul: instructions, section, modelSelection: await defaultSelection() }, { seedMessages: false }); store.patchBot(bot.id, { approvalMode: "full" }); return bot.id; },
+  policy: cofactoryPolicyFromEnv(process.env), ...(Number(process.env.COFACTORY_TICK_MS) > 0 ? { tickMs: Number(process.env.COFACTORY_TICK_MS) } : {}) });
 const emailIntegration = (bot: BotRecord, turn: { threadId: string; generation: string }) => emailHost.integration(bot, () => mintInternalCapability({ botId: bot.id, ...turn, kind: "email", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 }), `http://127.0.0.1:${PORT}`);
 
 let browserEngineInstall: Promise<void> | null = null;
@@ -10431,7 +10438,7 @@ const appTriggers = createAppTriggerHost({ store, webhooks, webhookBase: () => w
 tieAutomationsToBots(store, { routines: routines!, webhooks, apps: appTriggers.manager, waits: botWaits });
 ROUTES.push(appTriggers.routes); ROUTES.unshift(createMoveFreezeRoutes({ freeze: moveFreeze, owner: (auth) => ownHome.owner(auth), automationsOff: () => switchAutomationsOff({ routines: () => routines, webhooks: () => webhooks, appEvents: () => appTriggers.manager, waits: () => botWaits }), restart: () => { restartRequested = true; gracefulShutdown(); }, busy: createMoveWaits({ bots: () => store.bots, rooms: () => store.groups, answering: (id) => watchdog.answering(id), turn: botHasActiveTurn, runs: () => routines?.listRuns() ?? [], roomWorking: (id) => { const group = store.group(id); return Boolean(group && groupIsWorking(group)); }, handoffs: () => coordinator.active(), exists: (node) => !(!node.parentId && node.groupId ? roomRootProblem(node) : roomHandoffProblem(node)), signingIn: () => providerAuthSessions.active }) }));
 // before the freeze: a frozen copy is still its owner's to delete
-ROUTES.push(createCofactoryRoutes({ books: cofactory.books, evidence: cofactory.evidence, owner: (auth) => auth.scopes.includes("admin") && !(auth.kind === "loopback" && auth.trust === "service"), botExists: (id) => Boolean(store.bot(id)) }));
+ROUTES.push(createCofactoryRoutes({ books: cofactory.books, evidence: cofactory.evidence, runtime: cofactory.runtime, tick: cofactory.tick, owner: (auth) => auth.scopes.includes("admin") && !(auth.kind === "loopback" && auth.trust === "service"), botExists: (id) => Boolean(store.bot(id)) }));
 ROUTES.unshift(createStartFreshRoutes({ dataDir: DATA_DIR, owner: (auth) => ownHome.owner(auth), managed: () => CLOUD_HOME !== null || Boolean(process.env.DUSK_CLOUD_ROLE), restart: () => { restartRequested = true; gracefulShutdown(); } }));
 ROUTES.push(createLimitResetRoutes({ clock: limitClock, routines: routines!, requests: routineRequests, engineName, threadEngine: (botId, threadId) => turnSelection(botId, threadId)?.instanceId,
   threadTitle: (botId, threadId) => store.bot(botId) && !store.bot(botId)!.hidden ? store.taskByThread(botId, threadId)?.title ?? null : null,
@@ -16558,7 +16565,7 @@ server.listen(PORT, "127.0.0.1", async () => {
   }
   // Only once every registry is initialized and the endpoint listens: earlier dispatch can hit uninitialized bindings.
   moveFreeze.hold(() => { routines!.start(); botWaits.start(); proactive.start(); }, () => { routines!.stop(); botWaits.stop(); proactive.stop(); });
-  limitClock.start(); slackHost.start();
+  limitClock.start(); slackHost.start(); void cofactory.start();
   moveFreeze.hold(() => { memoryUpkeep.start(); importDistill.start(); }, () => { memoryUpkeep.stop(); importDistill.stop(); });
   try {
     const migrated = migrateMemory(DATA_DIR, { botIds: store.bots.map((bot) => bot.id), aboutMe: CLOUD_TEAM ? null : cfg.profile?.aboutMe ?? "" });

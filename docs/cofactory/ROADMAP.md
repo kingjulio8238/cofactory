@@ -15,7 +15,7 @@ stage's row and its section when its status changes. The rules behind the pipeli
 | Foundations | [F0 Books and control](#f0-books-and-control) | Done | 18 unit tests plus a fixture run where a bot's engine calls the tools |
 | Foundations | [F1 Truth layer](#f1-truth-layer) | Done | Hand-made true/false claims and events are classified correctly |
 | Foundations | [F2 Eval harness](#f2-eval-harness) | Done (core) | Runs in one command; flags a planted regression |
-| Foundations | [F3 Runtime and persistence](#f3-runtime-and-persistence) | Not started | A fake-engine company survives kills, restarts and a multi-day simulated run with no zombie state |
+| Foundations | [F3 Runtime and persistence](#f3-runtime-and-persistence) | Done | A fake-engine company survives kills, restarts and a multi-day simulated run with no zombie state |
 | Foundations | [F4 Observability](#f4-observability) | Not started | Every gate decision is traceable to its evidence and its cost |
 | Pipeline | [P1 Discovery](#p1-discovery) | Not started | Signals 100% verified; divergence under the ceiling across 10 simulated profiles |
 | Pipeline | [P2 Dossiers and scoring](#p2-dossiers-and-scoring) | Not started | Claim verifier ≥ 95%; adversarial Q&A; post-cutoff rediscovery baseline |
@@ -137,15 +137,135 @@ slips below the last passing run fails even while its bar still passes.
 **Why:** companies live for weeks. Restart and stall bugs are cheap to find with fake engines and expensive to find
 mid-launch.
 
-**Scope:**
-- Episodic sessions over dusk's runtime.
-- A company journal outside chat, which code checks was written.
-- Keep-working re-entry when a CLI stops early.
-- Session budgets.
-- Cadence and event wakes.
-- A heartbeat and a fake-work alarm.
-- Typed-message delivery.
-- A launcher that seats a team from a playbook.
+**Shape: many bounded sessions over durable state, not one long session.** The ULR longrun study (`specialist-index`,
+`harness/longrun*.py`, `keepworking.py`) informed this:
+- a single 20-hour session cost $970–$1,870 and plateaued at about 3.5 h;
+- native CLIs quit early;
+- rules kept only in context are lost at compaction.
+
+| Piece | Where | Ported from ULR |
+|---|---|---|
+| Sessions | `server/cofactory/runtime/sessions.ts` | `keepworking.py` |
+
+A session is one seat's bounded stretch of work:
+- `operating`: 45 min.
+- `deep`: 3 h.
+- `event`: woken by outside events.
+- `inbox`: woken by typed messages.
+
+How a session runs:
+- It starts with a full envelope: objective, done-when, budget, BRIEF.md, the last 8 journal entries, what woke it,
+  and open alarms.
+- When the seat's turn ends early, the session is re-entered with a short continue prompt saying how many minutes
+  remain.
+- The runtime stops it at the time budget (with a 2-min reserve) or the model budget (500 shadow cents).
+- It also stops after 5 rounds in a row under 90 s (a seat that only acknowledges), or after 20 rounds.
+- The seat ends a session with `cofactory_end_session`: `done`, `waiting` (must name what it waits on and when to
+  wake), or `blocked`. This is refused until the session has a journal entry.
+
+| Piece | Where | Ported from ULR |
+|---|---|---|
+| Journal | `cofactory_journal` tool; `server/cofactory/runtime/store.ts` (append-only table); `JOURNAL.md` in the company folder | `PROGRESS.md` outside history |
+
+- Every session starts from the journal, not from chat.
+- A session that ends without the seat writing to the journal gets a runtime entry and an `unjournaled` alarm.
+
+| Piece | Where | Ported from ULR |
+|---|---|---|
+| Company folder | `server/cofactory/runtime/workspace.ts` → `<data>/cofactory-companies/<id>/` | git-bundle checkpoints |
+
+- `BRIEF.md` holds the standing rules every session reads first, so rules live in files.
+- The folder is a git repository committed at the end of every session.
+- git is found even on a sealed PATH; without it the folder still works, just unversioned.
+
+| Piece | Where | Ported from ULR |
+|---|---|---|
+| Restart recovery | `sessions.recover()` | `--resume` with "result lost" |
+
+- After a restart, a session that still has time is re-entered with a note that its last action may or may not have
+  finished.
+- A session with no time left ends as `interrupted`.
+
+| Piece | Where | Ported from ULR |
+|---|---|---|
+| Zombie sweep | `sessions.sweep()` | server-side lifetime caps |
+
+A session past its budget plus 15 min without settling is interrupted, alarmed and ended.
+
+| Piece | Where | Ported from ULR |
+|---|---|---|
+| Scheduler | `server/cofactory/runtime/scheduler.ts` | — |
+
+- **Cadence:** one operating session per day for each CEO and for the lead, or at the wake time a `waiting` seat asked
+  for.
+- **Event wakes:** new outside events for a company wake its CEO, with the events in the prompt.
+- **Typed messages:** each message wakes the seat it is addressed to. Every seat has its own cursor, so one busy seat
+  never holds back another.
+- Every cursor is in the store, so a restart neither skips nor repeats a wake.
+
+| Piece | Where | Ported from ULR |
+|---|---|---|
+| Heartbeat and alarms | `server/cofactory/runtime/alarms.ts` | heartbeat and the stale board |
+
+| Alarm | Raised when |
+|---|---|
+| `stalled` | No outside event for 3 days |
+| `fake_work` | ≥ 1,500 shadow cents spent since the last outside event |
+| `journal_stale` | No journal entry across 2 cadences while sessions ran |
+| `unstaffed` | No CEO is seated |
+| `zombie` | A session ran past its budget without settling |
+| `unjournaled` | A session ended without the seat writing to the journal |
+
+A condition that clears resolves its alarm.
+
+| Piece | Where | Ported from ULR |
+|---|---|---|
+| Launcher | `server/cofactory/runtime/launcher.ts` | — |
+
+- Launching creates the books, the company folder and BRIEF.md, plus three dusk bots (CEO, builder, marketer) with
+  Full access, seated.
+- The lead's `cofactory_launch_company` tool uses it, and so does the owner's `POST /api/cofactory/launch`.
+
+**Wiring in dusk:**
+- Turns run through dusk's own `startTurn`, unattended, with the automation (untrusted-data) boundary, and
+  `onSettled` reports back.
+- Each seat works in one task thread per company.
+- The runtime starts with the server: it recovers sessions, then ticks every 30 s.
+- `COFACTORY_RUNTIME=0` turns it off.
+- For simulated runs, `COFACTORY_TICK_MS`, `COFACTORY_CADENCE_MS`, `COFACTORY_SESSION_MS` and
+  `COFACTORY_SHORT_ROUND_MS` shorten the clocks.
+- Owner routes:
+  - `GET /api/cofactory/state`, which now includes live sessions, recent sessions and alarms
+  - `GET /api/cofactory/journal`
+  - `GET /api/cofactory/sessions/:id`, the session with its event trail
+  - `POST /api/cofactory/companies/:id/wake`
+- Freeze and kill now cancel the company's running sessions.
+
+**Proof:**
+- `server/cofactory/runtime/runtime.test.ts` has 15 tests on a fake clock. They cover:
+  - the envelope
+  - re-entry
+  - the journal gate
+  - short-round stop
+  - time and model budgets
+  - restart recovery
+  - the zombie sweep
+  - kill
+  - cadence and waiting wakes
+  - event wakes
+  - per-seat message delivery
+  - alarms
+  - the launcher
+  - **a simulated week:** hourly ticks with an outside reply, a typed message and a restart. It ends with no zombie,
+    no seat running two sessions at once, every session journaled, 6 or more cadence sessions each for the CEO and
+    the lead, one event wake and one message wake.
+- Removing the journal gate, the short-round stop or the event cursor each fails a test.
+- `server/cofactory/runtime/runtime.e2e.test.ts` runs on a real dusk server with the fake engine:
+  1. launch a staffed company;
+  2. the CEO's session starts;
+  3. the server is **SIGKILLed mid-turn** and started again;
+  4. the session is recovered (`restarted` in its trail), re-entered, journaled and completed;
+  5. `JOURNAL.md` and the git checkpoint are on disk, with no zombie and no live session left.
 
 ### F4 Observability
 
@@ -180,3 +300,4 @@ A virtual card and model key per company, multiple factories, and calibration re
 
 - **2026-11-17:** F0 done. Roadmap approved. F1 and F2 started.
 - **2026-11-17:** F1 done and F2 core done. Stage gates now read the world. 34 unit tests pass, and `pnpm cofactory:eval` passes. Next: F3, runtime and persistence.
+- **2026-11-17:** F3 done: sessions, journal, company folders, keep-working re-entry, restart recovery, zombie sweep, scheduler (cadence, event and message wakes), alarms and the launcher. 15 runtime tests plus a real-server kill and restart e2e. Next: F4, observability.

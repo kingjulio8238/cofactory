@@ -1,12 +1,30 @@
 import { join } from "node:path";
 
+import { DEFAULT_RUNTIME_POLICY, type RuntimePolicy } from "../../shared/cofactory/runtime.ts";
 import { FACTORY_ROLES, type Membership } from "../../shared/cofactory/types.ts";
 import { openBook, type Book } from "./book.ts";
-import { openTruth, type Truth } from "./truth/store.ts";
 import { COFACTORY_INSTRUCTIONS } from "./instructions.ts";
+import { checkAlarms } from "./runtime/alarms.ts";
+import { createLauncher, type Launcher, type LauncherDeps } from "./runtime/launcher.ts";
+import { createScheduler, type Scheduler } from "./runtime/scheduler.ts";
+import { createSessions, type Sessions, type TurnPort } from "./runtime/sessions.ts";
+import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
+import { createWorkspaces } from "./runtime/workspace.ts";
 import { runTool, toolsFor, type ToolResult } from "./tools.ts";
+import { openTruth, type Truth } from "./truth/store.ts";
 
 export const COFACTORY_INTERNAL_MCP_PATH = "/api/internal/cofactory/mcp";
+
+/** COFACTORY_CADENCE_MS, COFACTORY_SESSION_MS and COFACTORY_SHORT_ROUND_MS shorten the runtime's clock for a simulated run. */
+export function cofactoryPolicyFromEnv(env: NodeJS.ProcessEnv): Partial<RuntimePolicy> {
+  const ms = (name: string) => (Number(env[name]) > 0 ? Number(env[name]) : undefined);
+  const cadence = ms("COFACTORY_CADENCE_MS"), session = ms("COFACTORY_SESSION_MS"), short = ms("COFACTORY_SHORT_ROUND_MS");
+  return {
+    ...(cadence ? { cadenceMs: cadence } : {}),
+    ...(session ? { operatingBudgetMs: session, deepBudgetMs: session, reserveMs: Math.min(DEFAULT_RUNTIME_POLICY.reserveMs, session / 10), zombieGraceMs: Math.min(DEFAULT_RUNTIME_POLICY.zombieGraceMs, session) } : {}),
+    ...(short ? { shortRoundMs: short } : {}),
+  };
+}
 
 export interface CofactoryHostDeps {
   dataDir: string;
@@ -15,18 +33,90 @@ export interface CofactoryHostDeps {
   tokenEnv: string;
   /** A turn-scoped capability for `botId`, kind "cofactory". */
   mint: (botId: string, turn: { threadId: string; generation: string }) => string;
+  /** How seats' turns run in dusk; without it the runtime does not start. */
+  turns?: Omit<TurnPort, "threadFor"> & { createThread(botId: string, title: string): string | null };
+  createBot?: LauncherDeps["createBot"];
+  policy?: Partial<RuntimePolicy>;
+  tickMs?: number;
+  log?: (line: string) => void;
+}
+
+interface Runtime {
+  store: RuntimeStore;
+  sessions: Sessions;
+  scheduler: Scheduler;
+  launcher: Launcher | undefined;
+  policy: RuntimePolicy;
 }
 
 export function createCofactoryHost(deps: CofactoryHostDeps) {
   let book: Book | null = null;
   let truth: Truth | null = null;
+  let runtime: Runtime | null = null;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  let ticking = false;
+  const log = deps.log ?? ((line: string) => console.log(line));
   const books = (): Book => (book ??= openBook(join(deps.dataDir, "cofactory.db")));
   const evidence = (): Truth => (truth ??= openTruth(join(deps.dataDir, "cofactory-evidence")));
   const seatOf = (botId: string): Membership | null => books().membership(botId);
 
+  function runtimeParts(): Runtime | null {
+    if (runtime) return runtime;
+    const turns = deps.turns;
+    if (!turns) return null;
+    const store = openRuntimeStore(join(deps.dataDir, "cofactory-runtime.db"));
+    const workspaces = createWorkspaces(join(deps.dataDir, "cofactory-companies"));
+    const policy: RuntimePolicy = { ...DEFAULT_RUNTIME_POLICY, ...deps.policy };
+    const port: TurnPort = {
+      threadFor(botId, companyId, title) {
+        const known = store.threadOf(botId, companyId);
+        if (known) return known;
+        const created = turns.createThread(botId, title);
+        if (!created) throw new Error("could not open a conversation for the seat");
+        store.setThread(botId, companyId, created);
+        return created;
+      },
+      start: turns.start,
+      interrupt: turns.interrupt,
+    };
+    const sessions = createSessions({ store, book: books(), workspaces, turns: port, policy, log });
+    const scheduler = createScheduler({ book: books(), truth: evidence(), store, sessions });
+    const launcher = deps.createBot ? createLauncher({ book: books(), workspaces, createBot: deps.createBot }) : undefined;
+    runtime = { store, sessions, scheduler, launcher, policy };
+    return runtime;
+  }
+
+  /** One pass of the runtime: zombies swept, alarms checked, and due sessions started. */
+  async function tick(): Promise<void> {
+    const parts = runtimeParts();
+    if (!parts || ticking) return;
+    ticking = true;
+    try {
+      await parts.sessions.sweep();
+      for (const alarm of checkAlarms({ book: books(), truth: evidence(), store: parts.store, policy: parts.policy })) log(`cofactory: alarm ${alarm.kind}: ${alarm.detail}`);
+      await parts.scheduler.tick();
+    } catch (error) {
+      log(`cofactory: runtime tick failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+    } finally {
+      ticking = false;
+    }
+  }
+
   return {
     books,
     evidence,
+    runtime: runtimeParts,
+    tick,
+
+    /** Recovers sessions a restart cut off, then ticks on an interval. */
+    async start(): Promise<void> {
+      const parts = runtimeParts();
+      if (!parts || timer) return;
+      await parts.sessions.recover();
+      timer = setInterval(() => { void tick(); }, deps.tickMs ?? 30_000);
+      timer.unref?.();
+      void tick();
+    },
 
     /** The stdio MCP server for a seated bot's turn; null for a bot with no seat. */
     integration(botId: string, turn: { threadId: string; generation: string }) {
@@ -54,7 +144,11 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       if (request?.method === "tools/list") return { tools: toolsFor(seat.role), instructions: COFACTORY_INSTRUCTIONS };
       if (request?.method !== "tools/call") throw Object.assign(new Error("unsupported cofactory method"), { status: 400 });
       const params = (request.params && typeof request.params === "object" ? request.params : {}) as { name?: unknown; arguments?: unknown };
-      const result = await runTool({ book: books(), truth: evidence(), seat, actor: `${seat.role}:${ctx.botName}` }, params.name, params.arguments);
+      const parts = runtimeParts();
+      const result = await runTool({
+        book: books(), truth: evidence(), seat, actor: `${seat.role}:${ctx.botName}`,
+        ...(parts ? { sessions: parts.sessions } : {}), ...(parts?.launcher ? { launcher: parts.launcher } : {}),
+      }, params.name, params.arguments);
       ctx.assertActive();
       return result;
     },
@@ -70,8 +164,12 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     },
 
     close(): void {
+      if (timer) clearInterval(timer);
+      timer = null;
+      runtime?.store.close();
       book?.close();
       truth?.close();
+      runtime = null;
       book = null;
       truth = null;
     },
