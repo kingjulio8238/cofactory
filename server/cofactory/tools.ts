@@ -17,7 +17,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { verifyEvidence } from "./truth/gate.ts";
 import { POSTMORTEM_CAUSES } from "./discovery/store.ts";
-import type { FactorySettings } from "./settings.ts";
+import { startingStakeLimit, topUpProblem, type FactorySettings } from "./settings.ts";
 import type { Truth } from "./truth/store.ts";
 import type { Launcher } from "./runtime/launcher.ts";
 import type { Sessions } from "./runtime/sessions.ts";
@@ -659,9 +659,9 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     async run(args, ctx) {
       const { book, actor, launcher } = ctx;
       if (!args.dossier_id && !args.brief.trim()) return refused("give a brief, or a dossier_id to launch from");
-      const ownerCap = ctx.settings?.().companyCapCents ?? 0;
+      const ownerCap = ctx.settings ? startingStakeLimit(ctx.settings()) : 0;
       if (ownerCap > 0 && args.cap_cents > ownerCap) {
-        const reason = `the owner caps each company at ${ownerCap} cents`;
+        const reason = `a new company starts with at most ${ownerCap} cents under the owner's settings`;
         decide(ctx, "company.launch", "refused", `${args.name} with ${args.cap_cents} cents: ${reason}`, [], null);
         return refused(reason);
       }
@@ -675,10 +675,16 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
   }),
   spec({
     name: "cofactory_top_up",
-    description: "Give a live company more money from unallocated, after a selling signal.",
+    description: "Give a live company more money from unallocated. Under the owner's settings either no company passes its fixed cap, or more money goes only to a company that has made money.",
     roles: ["lead"],
     input: z.object({ company_id: z.string().min(1), cents }),
     run(args, ctx) {
+      const company = ctx.book.company(args.company_id);
+      if (company && ctx.settings) {
+        const earned = ctx.book.entries({ companyId: company.id }).filter((entry) => entry.kind === "revenue").reduce((sum, entry) => sum + entry.cents, 0);
+        const problem = topUpProblem(ctx.settings(), company, args.cents, earned);
+        if (problem) { decide(ctx, "company.top_up", "refused", problem, [{ type: "company", id: company.id }], company.id); return refused(problem); }
+      }
       const result = ctx.book.topUp(args.company_id, args.cents, ctx.actor);
       decide(ctx, "company.top_up", result.ok ? "allowed" : "refused", result.ok ? `${args.cents} cents` : result.reason, [{ type: "company", id: args.company_id }], args.company_id);
       return result.ok ? ok({ company: result.company }) : refused(result.reason);

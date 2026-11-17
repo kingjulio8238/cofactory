@@ -155,38 +155,73 @@ function AmountChoice({ label, options, value, onChange }: { label: string; opti
   );
 }
 
-/** What the factory may spend in a month, and the most one company gets. */
-export function StakeStep({ budgetCents, capCents, onNext }: { budgetCents: number; capCents: number; onNext: () => void }) {
-  const [budget, setBudget] = useState(budgetCents || 10_000);
-  const [cap, setCap] = useState(capCents || 4_000);
+/** The money: what goes in this month, how it is split between companies, and how long a company gets to make money. */
+export function StakeStep({ budgetCents, capCents, allocation, closeAfterDays, onNext }: {
+  budgetCents: number; capCents: number; allocation: "fixed" | "dynamic"; closeAfterDays: number; onNext: () => void;
+}) {
+  const [budget, setBudget] = useState(budgetCents || 50_000);
+  const [split, setSplit] = useState(allocation);
+  const [cap, setCap] = useState(capCents || 5_000);
+  const [days, setDays] = useState(closeAfterDays || 5);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const count = cap > 0 ? Math.floor(budget / cap) : 0;
-  const problem = cap < MIN_STAKE_CENTS ? `A company needs at least ${dollars(MIN_STAKE_CENTS)}.` : cap > budget ? "One company can't get more than the monthly budget." : null;
+  const start = Math.max(MIN_STAKE_CENTS, Math.floor(budget / 10));
+  const problem = budget < MIN_STAKE_CENTS ? `Put in at least ${dollars(MIN_STAKE_CENTS)}.`
+    : split === "fixed" && cap < MIN_STAKE_CENTS ? `A company needs at least ${dollars(MIN_STAKE_CENTS)}.`
+    : split === "fixed" && cap > budget ? "One company can't get more than the month's money." : null;
+  const count = split === "fixed" ? Math.floor(budget / cap) : Math.floor(budget / start);
   const save = async () => {
     setBusy(true);
     setError(null);
     try {
-      await api("/api/cofactory/settings", { method: "POST", body: JSON.stringify({ budgetCents: budget, companyCapCents: cap }) });
+      await api("/api/cofactory/settings", { method: "POST", body: JSON.stringify({ budgetCents: budget, allocation: split, closeAfterDays: days, ...(split === "fixed" ? { companyCapCents: cap } : {}) }) });
       onNext();
     } catch (cause) {
-      setError(friendlyError(cause, "Couldn't save your stake. Try again."));
+      setError(friendlyError(cause, "Couldn't save that. Try again."));
     } finally {
       setBusy(false);
     }
   };
+  const choice = (value: "dynamic" | "fixed", title: string, why: string, tag?: string) => (
+    <button type="button" role="radio" aria-checked={split === value} data-stake-split={value} onClick={() => setSplit(value)}
+      className={cn(TILE, "flex min-w-0 flex-1 flex-col items-start gap-1.5 p-4 text-start", split === value && "bg-ink/[0.08] outline outline-2 outline-ink")}>
+      <span className="flex w-full items-center justify-between gap-2">
+        <span className="text-[15px] font-semibold leading-5 text-ink">{title}</span>
+        {tag && <span className="rounded-full bg-ink/[0.06] px-2 py-0.5 text-[12px] leading-4 text-ink-secondary">{tag}</span>}
+      </span>
+      <span className="text-[13px] leading-[18px] text-ink-secondary">{why}</span>
+    </button>
+  );
   return (
-    <StepFrame art={<StepArt art="coins" />} title="Your stake"
-      sub="What your factory may spend each month on real things like domains and ads. AI use runs on your own plan."
+    <StepFrame art={<StepArt art="coins" />} title="Fund your factory" wide
+      sub="What it can spend this month on real things like domains, ads and payment fees. AI use runs on your own plan."
       footer={<>
         <ErrorLine text={error} />
         <button type="button" data-primary="" data-stake-next="" disabled={Boolean(problem) || busy} onClick={() => void save()} className={PRIMARY}>Continue</button>
       </>}>
-      <div className="flex w-full max-w-[440px] flex-col gap-5">
-        <AmountChoice label="Each month" options={[5_000, 10_000, 25_000, 50_000]} value={budget} onChange={setBudget} />
-        <AmountChoice label="The most one company gets" options={[2_500, 4_000, 10_000]} value={cap} onChange={setCap} />
+      <div className="flex w-full flex-col gap-6">
+        <AmountChoice label="This month" options={[10_000, 25_000, 50_000, 100_000]} value={budget} onChange={setBudget} />
+        <div className="flex flex-col gap-2 text-start">
+          <span className="text-[13px] font-medium leading-[18px] text-ink">How it's split</span>
+          <div role="radiogroup" aria-label="How it's split" className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {choice("dynamic", "Let the factory decide", "New companies start small. Your lead puts more into whatever is making money.", "Recommended")}
+            {choice("fixed", "Same cap for each", "Every company gets at most the amount you pick.")}
+          </div>
+        </div>
+        {split === "fixed" && <AmountChoice label="The most one company gets" options={[2_500, 5_000, 10_000]} value={cap} onChange={setCap} />}
+        <div className="flex flex-col gap-2 text-start">
+          <span id="stake-days" className="text-[13px] font-medium leading-[18px] text-ink">Close a company with no paying customer after</span>
+          <div role="radiogroup" aria-labelledby="stake-days" className="flex gap-2">
+            {[5, 7].map((value) => (
+              <button key={value} type="button" role="radio" aria-checked={days === value} data-stake-days={value} onClick={() => setDays(value)}
+                className={cn(TILE, "min-h-10 px-4 text-[14px]", days === value && "bg-ink text-app hover:bg-ink")}>{value} days</button>
+            ))}
+          </div>
+        </div>
         <p data-stake-summary="" className="rounded-2xl bg-ink/[0.035] px-4 py-3 text-start text-[14px] leading-5 text-ink-secondary">
-          {problem ?? <>Up to <span className="font-medium text-ink">{count} {count === 1 ? "company" : "companies"}</span> at a time, {dollars(cap)} each. A company that hasn't earned more is closed before it spends it all.</>}
+          {problem ?? (split === "dynamic"
+            ? <>Each new company starts with up to <span className="font-medium text-ink">{dollars(start)}</span>, so about {count} can run at once. More goes only to companies with paying customers. No paying customer in {days} days and it's closed, with what it learned kept for the next one.</>
+            : <>Up to <span className="font-medium text-ink">{count} {count === 1 ? "company" : "companies"}</span> at a time, {dollars(cap)} each. No paying customer in {days} days and it's closed, with what it learned kept for the next one.</>)}
         </p>
       </div>
     </StepFrame>

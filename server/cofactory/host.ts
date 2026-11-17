@@ -30,7 +30,7 @@ import { openRails, type Rails } from "./validation/rails.ts";
 import { openSprints, type Sprints } from "./validation/sprints.ts";
 import { openOrders, type Orders } from "./validation/orders.ts";
 import { createRehearsals } from "./validation/rehearsal.ts";
-import { openSettings } from "./settings.ts";
+import { closeIdleCompanies, openSettings } from "./settings.ts";
 import { armsLength } from "./truth/classify.ts";
 import { writeFileAtomic } from "../atomic.ts";
 
@@ -106,7 +106,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
   const offerFile = (companyId: string) => join(deps.dataDir, "cofactory-companies", companyId, "offer", "index.html");
   const validationParts = () => {
     if (validation) return validation;
-    const sprints = openSprints(join(deps.dataDir, "cofactory-sprints.db"), { truth: evidence() });
+    const sprints = openSprints(join(deps.dataDir, "cofactory-sprints.db"), { truth: evidence(), policy: { sprintDays: settings.get().closeAfterDays } });
     const rails = openRails(join(deps.dataDir, "cofactory-rails.json"));
     const mail: MailPort = deps.mailDryRunFile ? dryRunMailPort(deps.mailDryRunFile)
       : deps.email ? duskMailPort(deps.email) : { send: async () => { throw new Error("email is not available on this server"); }, fetchNew: async () => [] };
@@ -238,6 +238,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       for (const alarm of checkAlarms({ book: books(), truth: evidence(), store: parts.store, policy: parts.policy })) log(`cofactory: alarm ${alarm.kind}: ${alarm.detail}`);
       await sprintUpkeep(parts.store);
       bookRevenue();
+      closeIdleCompanies({ book: books(), settings: settings.get(), store: parts.store, observe: observe(), log });
       for (const company of books().companies().filter((candidate) => candidate.status === "live")) {
         const missing = validationParts().rails.missing(company.id);
         const detail = `the owner has not connected ${missing.join(", ")}; work that needs them waits, everything else goes ahead`;

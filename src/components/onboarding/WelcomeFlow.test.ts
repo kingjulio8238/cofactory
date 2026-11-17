@@ -702,7 +702,7 @@ describe("the Cofactory first run", () => {
     vi.stubGlobal("duskDesktop", { remoteClient: { active: false }, requireUserPresence: async () => true, platform: "linux" });
     const base = f.api.getMockImplementation()!;
     f.api.mockImplementation(async (path: string, init?: { body?: string; method?: string }) => {
-      if (path === "/api/cofactory/settings" && !init?.method) return { settings: { country: null, region: null, budgetCents: 0, companyCapCents: 0, approvals: { launch: "ask", spendOverCents: 2_500, kill: "tell" }, hunches: [], never: [] }, relatedParties: { emails: [], domains: [] } };
+      if (path === "/api/cofactory/settings" && !init?.method) return { settings: { country: null, region: null, budgetCents: 0, companyCapCents: 0, allocation: "dynamic", closeAfterDays: 5, approvals: { launch: "ask", spendOverCents: 2_500, kill: "tell" }, hunches: [], never: [] }, relatedParties: { emails: [], domains: [] } };
       if (path === "/api/cofactory/factory/open") return { ok: true, staffed: [{ role: "lead", botId: "lead-1", created: true }, { role: "scout", botId: "scout-1", created: true }], territories: ["Roofing Contractors (NAICS 238160)", "Funeral Homes and Funeral Services (NAICS 812210)", "Dental Laboratories (NAICS 339116)", "Marinas (NAICS 713930)"] };
       if (path.startsWith("/api/cofactory/")) return { ok: true };
       return base(path, init);
@@ -725,9 +725,15 @@ describe("the Cofactory first run", () => {
     expect(posted("/api/cofactory/settings")).toContainEqual({ country: "US", region: null });
 
     expect(step()).toBe("stake");
-    expect(document.body.querySelector("[data-stake-summary]")?.textContent).toContain("Up to 2 companies at a time, $40 each");
+    expect(title()).toBe("Fund your factory");
+    expect(document.body.querySelector("[data-stake-summary]")?.textContent, "the factory decides by default").toContain("Each new company starts with up to $50, so about 10 can run at once");
+    expect(document.body.querySelector("[data-stake-summary]")?.textContent).toContain("No paying customer in 5 days and it's closed");
+    await choose("[data-stake-split=fixed]");
+    expect(document.body.querySelector("[data-stake-summary]")?.textContent).toContain("Up to 10 companies at a time, $50 each");
+    await choose("[data-stake-split=dynamic]");
+    await choose("[data-stake-days='7']");
     await press("Continue");
-    expect(posted("/api/cofactory/settings")).toContainEqual({ budgetCents: 10_000, companyCapCents: 4_000 });
+    expect(posted("/api/cofactory/settings")).toContainEqual({ budgetCents: 50_000, allocation: "dynamic", closeAfterDays: 7 });
 
     expect(step(), "an optional hunch, skipped by most").toBe("hunch");
     await press("Skip");
@@ -761,5 +767,23 @@ describe("the Cofactory first run", () => {
     expect(button("Skip"), "nothing to skip once something is written").toBeUndefined();
     await press("Continue");
     expect(posted("/api/cofactory/settings")).toContainEqual({ hunches: ["DIR fee recovery for one-store pharmacies"], never: ["Anything with medical advice"] });
+  });
+});
+
+describe("the notifications step in React's StrictMode", () => {
+  it("reads the Mac's permissions and lets Allow be pressed, though StrictMode mounts the step twice", async () => {
+    vi.stubEnv("VITE_COFACTORY", "");
+    let notifications: "missing" | "granted" = "missing";
+    const status = async () => ({ supported: true as const, accessibility: "granted" as const, screen: "granted" as const, notifications });
+    const request = vi.fn(async () => { notifications = "granted"; return status(); });
+    vi.stubGlobal("duskDesktop", { remoteClient: { active: false }, requireUserPresence: async () => true, platform: "darwin", macPermissions: { status, request } });
+    await act(async () => { root.render(createElement(StrictMode, null, createElement(WelcomeFlow, { onDone: f.onDone, initialBeat: "notify" }))); });
+    await settle();
+    const allow = document.body.querySelector<HTMLButtonElement>("[data-permission-ask=notifications]");
+    expect(allow?.disabled, "the read status reaches the step").toBe(false);
+    await act(async () => { allow!.click(); });
+    await settle();
+    expect(request).toHaveBeenCalledWith("notifications", expect.objectContaining({ title: expect.any(String) }));
+    expect(document.body.querySelector("[data-permission=notifications]")?.getAttribute("data-permission-state")).toBe("granted");
   });
 });

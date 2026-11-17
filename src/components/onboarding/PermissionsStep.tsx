@@ -29,7 +29,7 @@ export function PermissionsStep({ bridge, onNext, relaunch, kinds = MAC_PERMISSI
   const [status, setStatus] = useState<MacPermissionStatus | null>(null);
   const [busy, setBusy] = useState<MacPermission | null>(null);
   const live = useRef(true);
-  useEffect(() => () => { live.current = false; }, []);
+  useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
 
   const read = useCallback(() => {
     void bridge.status().then((next) => { if (live.current) setStatus(next); }, () => {});

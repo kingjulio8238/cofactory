@@ -35,7 +35,7 @@ type Config = ReturnType<typeof useStore>["state"]["config"];
 
 /** What the factory already has, read once so a resumed or replayed first run starts from it. */
 interface FactoryKnown {
-  settings: { country: string | null; region: string | null; budgetCents: number; companyCapCents: number; approvals: Approvals; hunches: string[]; never: string[] };
+  settings: { country: string | null; region: string | null; budgetCents: number; companyCapCents: number; allocation: "fixed" | "dynamic"; closeAfterDays: number; approvals: Approvals; hunches: string[]; never: string[] };
   relatedParties: { emails: string[]; domains: string[] };
 }
 
@@ -340,7 +340,8 @@ export function WelcomeFlow({
       body = <HunchStep hunches={factoryKnown?.settings.hunches ?? []} never={factoryKnown?.settings.never ?? []} onNext={next} />;
       break;
     case "stake":
-      body = <StakeStep budgetCents={factoryKnown?.settings.budgetCents ?? 0} capCents={factoryKnown?.settings.companyCapCents ?? 0} onNext={next} />;
+      body = <StakeStep budgetCents={factoryKnown?.settings.budgetCents ?? 0} capCents={factoryKnown?.settings.companyCapCents ?? 0}
+        allocation={factoryKnown?.settings.allocation ?? "dynamic"} closeAfterDays={factoryKnown?.settings.closeAfterDays ?? 5} onNext={next} />;
       break;
     case "approvals": {
       const known = factoryKnown?.relatedParties;

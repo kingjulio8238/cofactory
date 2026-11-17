@@ -206,7 +206,7 @@ export function PhoneStep({ onNext, copy }: { onNext: () => void; copy?: { title
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const live = useRef(true);
-  useEffect(() => () => { live.current = false; }, []);
+  useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
 
   const show = useCallback(async () => {
     setPairing({ kind: "busy" });
