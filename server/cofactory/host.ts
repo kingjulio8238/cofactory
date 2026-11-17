@@ -24,7 +24,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { EmailAccount } from "../email/store.ts";
 import type { EmailGuard } from "../email/client.ts";
 import { createIntakeDoor } from "./validation/intake.ts";
-import { duskMailPort } from "./validation/mail-dusk.ts";
+import { dryRunMailPort, duskMailPort } from "./validation/mail-dusk.ts";
 import { createOutreach, type MailPort, type Outreach } from "./validation/outreach.ts";
 import { openRails, type Rails } from "./validation/rails.ts";
 import { openSprints, type Sprints } from "./validation/sprints.ts";
@@ -57,6 +57,8 @@ export interface CofactoryHostDeps {
   turns?: Omit<TurnPort, "threadFor"> & { createThread(botId: string, title: string): string | null };
   createBot?: LauncherDeps["createBot"];
   policy?: Partial<RuntimePolicy>;
+  /** When set, outreach is written to this file instead of being sent, so a live run reaches no one. */
+  mailDryRunFile?: string;
   /** dusk's connected mailboxes, which company outreach sends from and reads replies in. */
   email?: { store: { get(address: string): EmailAccount | null }; guard: EmailGuard };
   tickMs?: number;
@@ -105,7 +107,8 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     if (validation) return validation;
     const sprints = openSprints(join(deps.dataDir, "cofactory-sprints.db"), { truth: evidence() });
     const rails = openRails(join(deps.dataDir, "cofactory-rails.json"));
-    const mail: MailPort = deps.email ? duskMailPort(deps.email) : { send: async () => { throw new Error("email is not available on this server"); }, fetchNew: async () => [] };
+    const mail: MailPort = deps.mailDryRunFile ? dryRunMailPort(deps.mailDryRunFile)
+      : deps.email ? duskMailPort(deps.email) : { send: async () => { throw new Error("email is not available on this server"); }, fetchNew: async () => [] };
     const outreach = createOutreach({ sprints, truth: evidence(), mail, mailboxFor: (companyId) => rails.peek(companyId)?.mailbox ?? null, cursor: sprints.cursor });
     validation = {
       sprints, outreach, rails, orders: openOrders(join(deps.dataDir, "cofactory-orders.db")),

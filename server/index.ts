@@ -2461,7 +2461,7 @@ const cofactory = createCofactoryHost({ dataDir: DATA_DIR, proxy: { command: pro
     interrupt: async (botId: string, threadId: string) => { cancelDirectTurnDispatch(botId, threadId); revokeInternalCapabilitiesForThread(threadId); await runningTurnInstance(botForThread(botId, threadId), threadId)?.adapter.interruptTurn(threadId); },
   } }),
   createBot: async ({ name, instructions, section }) => { const bot = store.createBot({ name, soul: instructions, section, modelSelection: await defaultSelection() }, { seedMessages: false }); store.patchBot(bot.id, { approvalMode: "full" }); return bot.id; },
-  policy: cofactoryPolicyFromEnv(process.env), email: emailService, ...(Number(process.env.COFACTORY_TICK_MS) > 0 ? { tickMs: Number(process.env.COFACTORY_TICK_MS) } : {}) });
+  policy: cofactoryPolicyFromEnv(process.env), email: emailService, ...(process.env.COFACTORY_MAIL_DRY_RUN ? { mailDryRunFile: process.env.COFACTORY_MAIL_DRY_RUN } : {}), ...(Number(process.env.COFACTORY_TICK_MS) > 0 ? { tickMs: Number(process.env.COFACTORY_TICK_MS) } : {}) });
 const emailIntegration = (bot: BotRecord, turn: { threadId: string; generation: string }) => emailHost.integration(bot, () => mintInternalCapability({ botId: bot.id, ...turn, kind: "email", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 }), `http://127.0.0.1:${PORT}`);
 
 let browserEngineInstall: Promise<void> | null = null;

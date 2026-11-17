@@ -1,5 +1,8 @@
 import { listMessages, readMessage, sendMessage, type EmailGuard } from "../../email/client.ts";
 import type { EmailAccount } from "../../email/store.ts";
+import { appendFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+
 import type { MailPort } from "./outreach.ts";
 
 /** Outreach mail through a mailbox connected in dusk (IMAP and SMTP), read and sent by the server, never by a bot turn. */
@@ -30,5 +33,17 @@ export function duskMailPort(service: { store: { get(address: string): EmailAcco
       }
       return out;
     },
+  };
+}
+
+/** A mailbox that sends nothing: every message is appended to `file` as a JSON line, and no replies ever arrive. */
+export function dryRunMailPort(file: string): MailPort {
+  return {
+    async send(mailbox, input) {
+      const messageId = `<${randomUUID()}@dry-run.cofactory.invalid>`;
+      appendFileSync(file, `${JSON.stringify({ at: new Date().toISOString(), from: mailbox, messageId, ...input })}\n`, { mode: 0o600 });
+      return { messageId, rejected: [] };
+    },
+    fetchNew: async () => [],
   };
 }
