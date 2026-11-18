@@ -849,8 +849,9 @@ holder before Cofactory sells hosting.
 passes its gate.
 
 **A: First dollar.** This is the P3 and P4 exit gate.
-1. **Finish the live run.** Take the first search through dossiers to the lead's first launch request, approved in the
-   app, and fix what it exposes.
+1. **The approve stage** (built, `design-companies.md` stage 1): a search of 8 ideas, three checked cards on the owner's
+   Home, Start or Pass, and a company that launches once its full dossier holds up. First real card in 40 minutes for
+   about $7 of model use.
 2. **Go live in the app:**
    - the rails checklist with live checks (`pnpm cofactory:rails-check` behind a screen);
    - Stripe's webhook created by the app;

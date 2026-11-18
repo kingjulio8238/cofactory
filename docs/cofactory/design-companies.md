@@ -226,9 +226,13 @@ Real-time comes from a server-sent stream of the decisions log. There is no poll
 
 Each stage passes its test before the next starts.
 
-1. **Approve stage with the fast first pass.** It is the blocker to the first dollar and to the live run.
+1. **Approve stage with the fast first pass.** It is the blocker to the first dollar and to the live run. **Built.**
    *Test:* a real-model shadow run, measuring time and cost to the first card. Then the walkthrough ends in Pick, not a
-   chat.
+   chat. **Measured (2026-11-18, Claude Sonnet 5, Ohio, six drawn industries):** search of 8 niches from 27 verified
+   quotes in 35 min; first card ready at 40 min for $6.99 of model use (API-price estimate); all three cards at 48 min
+   for $8.42. The previous design reached no dossier in a day for $25. Weak spots the run showed, to fix next:
+   - a price buyers pay "per hour" is compared through an hours-per-month figure nobody sourced;
+   - a rival's own page can stand in as one of the card's buyer quotes.
 2. **Sidebar and Home.** Company dropdowns, no rail, no lead or scout.
    *Test:* walkthrough and DOM tests.
 3. **Company dashboard.** Read-only, from existing data, live.
