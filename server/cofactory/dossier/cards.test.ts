@@ -104,6 +104,14 @@ describe("cards: the owner picks companies before any is started", () => {
     for (const decision of decisions) expect(traceProblem(f.cofactory.traceDeps(), decision)).toBeNull();
   });
 
+  it("closes a search that met its target and quotas by itself, so the cards never wait on the scout to close it", async () => {
+    const f = await factory();
+    await f.cofactory.tick();
+    expect(f.cofactory.discovery().store.openBatch()).toBeNull();
+    expect([f.strong, f.middle, f.weak].map((id) => f.cofactory.discovery().store.niche(id)!.status)).toEqual(["card", "card", "candidate"]);
+    expect(f.started.some((text) => text.includes("Write the card for")), "and the scout is woken for the first card").toBe(true);
+  });
+
   it("starts a company only after the owner's Start and a clean full dossier; a pass teaches the next search; nothing moves money until then", async () => {
     const f = await factory();
     const deck = f.cofactory.cards();

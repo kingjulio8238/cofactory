@@ -142,6 +142,15 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
    */
   async function cardUpkeep(): Promise<void> {
     const deck = cardService(), store = discoveryService().store, launcher = runtimeParts()?.launcher;
+    // a search that met its target and quotas closes here, so the owner's cards never wait on the scout remembering to
+    const open = discoveryService().batchStatus();
+    if (open && open.batch.closedAt === null && open.complete) {
+      const closed = discoveryService().closeBatch();
+      if (closed.ok) {
+        for (const id of deck.select(closed.status.batch.id)) observe().decide({ companyId: null, session: null, actor: "runtime", kind: "niche.card", verdict: "allowed", reason: "picked for a card from the closed search", evidence: [{ type: "niche", id }] });
+        log(`cofactory: closed search ${closed.status.batch.id.slice(0, 8)} with ${closed.status.niches} niches`);
+      }
+    }
     for (const card of deck.all()) {
       if (card.status === "ready" && settings.get().approvals.launch === "auto") startCard(card.id, "factory");
       if (card.status !== "started") continue;
