@@ -276,7 +276,7 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
         country: z.string().regex(/^[A-Z]{2}$/).nullable().optional(), region: z.string().max(80).nullable().optional(),
         budgetCents: z.number().int().min(0).max(100_000_000).optional(), companyCapCents: z.number().int().min(0).max(100_000_000).optional(),
         allocation: z.enum(["fixed", "dynamic"]).optional(), closeAfterDays: z.number().int().min(2).max(30).optional(),
-        goLiveDays: z.number().int().min(3).max(60).optional(), dailyModelCents: z.number().int().min(0).max(1_000_000).optional(),
+        goLiveDays: z.number().int().min(3).max(60).optional(),
         approvals: z.object({ launch: z.enum(["ask", "auto"]).optional(), spendOverCents: z.number().int().min(0).max(10_000_000).optional(), kill: z.enum(["ask", "tell"]).optional() }).optional(),
         onboarded: z.boolean().optional(),
         hunches: z.array(z.string().trim().min(3).max(300)).max(3).optional(), never: z.array(z.string().trim().min(2).max(300)).max(20).optional(),

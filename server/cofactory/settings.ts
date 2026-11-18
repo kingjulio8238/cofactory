@@ -25,8 +25,6 @@ export interface FactorySettings {
   closeAfterDays: number;
   /** A company that never went live (outreach armed) this many days after launch is closed the same way. */
   goLiveDays: number;
-  /** The most model use, at API prices, the factory may start new sessions on in one day (it runs on the owner's plan). */
-  dailyModelCents: number;
   approvals: {
     launch: "ask" | "auto";
     /** Spends above this ask the owner first; 0 never asks. */
@@ -42,8 +40,18 @@ export interface FactorySettings {
   onboardedAt: number | null;
 }
 
+/**
+ * The most model use, at API prices, the factory may start new sessions on in one day. Model use is Cofactory's cost, not
+ * the owner's, so this is the operator's guard (COFACTORY_DAILY_MODEL_CENTS, $25 by default) and never counts against the
+ * owner's budget; 0 turns it off.
+ */
+export function operatorDailyModelCents(): number {
+  const set = Number(process.env.COFACTORY_DAILY_MODEL_CENTS);
+  return process.env.COFACTORY_DAILY_MODEL_CENTS !== undefined && Number.isFinite(set) && set >= 0 ? set : 2_500;
+}
+
 export const DEFAULT_SETTINGS: FactorySettings = {
-  country: null, region: null, budgetCents: 0, companyCapCents: 0, allocation: "dynamic", closeAfterDays: 5, goLiveDays: 14, dailyModelCents: 2_500,
+  country: null, region: null, budgetCents: 0, companyCapCents: 0, allocation: "dynamic", closeAfterDays: 5, goLiveDays: 14,
   approvals: { launch: "ask", spendOverCents: 2_500, kill: "tell" },
   hunches: [], never: [], seed: null,
   onboardedAt: null,

@@ -45,9 +45,11 @@ export function WelcomeGate({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
   const [dismissed, setDismissed] = useState(false);
   const remoteClient = window.duskDesktop?.remoteClient?.active === true;
+  // a factory has no installs from before the welcome kept its record, so only the server's record says it is done
+  const legacyDone = !cofactoryEnabled() && emailGateDone();
   // A welcome finished elsewhere (another window, an older version's record) leaves no draft behind to resume later.
   const finished = Boolean(viewer && state.config) && !welcomeDue(state.config, {
-    remoteClient, legacyDone: emailGateDone(), canSave: viewer?.canSave, cloudHome: viewer?.cloudHome, fromApp: openedFromTheApp(),
+    remoteClient, legacyDone, canSave: viewer?.canSave, cloudHome: viewer?.cloudHome, fromApp: openedFromTheApp(),
   });
   useEffect(() => {
     if (finished) clearWelcomeDraft();
@@ -57,7 +59,7 @@ export function WelcomeGate({ viewer }: { viewer: WelcomeViewer | null }) {
     !dismissed &&
     welcomeDue(state.config, {
       remoteClient,
-      legacyDone: emailGateDone(),
+      legacyDone,
       canSave: viewer?.canSave,
       cloudHome: viewer?.cloudHome,
       fromApp: openedFromTheApp(),

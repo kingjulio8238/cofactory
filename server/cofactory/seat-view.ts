@@ -23,7 +23,6 @@ export function ownerAlarm(alarm: Pick<Alarm, "kind" | "companyId">, rails: Pick
       const missing = alarm.companyId ? rails.missing(alarm.companyId) : [];
       return missing.length ? `Connect ${missing.join(", ")} so ${companyName ?? "it"} can take customers. Everything else goes ahead.` : null;
     }
-    case "daily_ceiling": return "Today's AI use reached your daily limit. Work starts again tomorrow, or raise the limit in settings.";
     case "mail_failed": return "The mailbox could not be read. Check its connection so replies are not missed.";
     case "order_overdue": return `A paying customer's order${companyName ? ` at ${companyName}` : ""} is overdue.`;
     default: return null;

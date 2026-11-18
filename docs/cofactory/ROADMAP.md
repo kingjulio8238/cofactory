@@ -802,8 +802,10 @@ The board as home, inbox cards, standups, the kill switch, onboarding and the ph
   one scopes the sidebar to its crew.
 - **Owner controls:**
   - launches, large spends and closes wait for approval when the owner asked;
-  - 5 days to a paying customer, counted from going live, and 14 days to go live at all;
-  - a daily ceiling on model use.
+  - 5 days to a paying customer, counted from going live, and 14 days to go live at all.
+- **Model use is Cofactory's cost, never the owner's.** The owner's budget is only for real-world spend (domains, ads,
+  payment fees), and onboarding says the AI work is on us. The daily ceiling on model use is the operator's guard
+  (`COFACTORY_DAILY_MODEL_CENTS`, $25 by default), not an owner setting, and never appears in Needs you.
 - **The factory lead is the chief of staff,** seats work in their own chat, and packaged builds never take dusk.bot's
   updates.
 
@@ -854,6 +856,10 @@ passes its gate.
    - Stripe's webhook created by the app;
    - a preview of the offer page and the first emails;
    - an **Arm** button in the Factory tab, in place of the `curl` call.
+
+  `pnpm cofactory:walkthrough` runs a throwaway factory on the fake engine for clicking through by hand, from the welcome
+  screen to a launched company; `server/cofactory/lifecycle.e2e.test.ts` runs the whole life, through the first dollar
+  and a close, on every change.
 3. **The owner's rails:** a domain and mailbox, Stripe, a postal address, and a public address for the intake.
 4. **The first real sprint:** a paying customer, delivered and rehearsed, or a clean close with its post-mortem.
 
@@ -867,6 +873,8 @@ passes its gate.
 *Gate:* a week of unattended running with no lost session and every approval answered.
 
 **C: Ready for friends:**
+- **Cofactory pays for the model:** an engine Cofactory provides and pays for, in place of the owner's own Claude Code
+  sign-in, with its cost per factory on the ops board;
 - the app's own name, bundle id and release signing;
 - its own account service, or no account;
 - location pre-fill and the optional edge step;

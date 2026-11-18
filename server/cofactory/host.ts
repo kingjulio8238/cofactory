@@ -30,7 +30,7 @@ import { openRails, type Rails } from "./validation/rails.ts";
 import { openSprints, type Sprints } from "./validation/sprints.ts";
 import { openOrders, type Orders } from "./validation/orders.ts";
 import { createRehearsals } from "./validation/rehearsal.ts";
-import { closeIdleCompanies, openSettings } from "./settings.ts";
+import { closeIdleCompanies, openSettings, operatorDailyModelCents } from "./settings.ts";
 import { fixtureFetcher } from "./evals/suites.ts";
 import { openApprovals, type Approval, type Approvals } from "./approvals.ts";
 import type { KillReason, SpendCategory } from "../../shared/cofactory/types.ts";
@@ -274,12 +274,12 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       interrupt: turns.interrupt,
     };
     const sessions = createSessions({ store, book: books(), workspaces, turns: port, policy, log, holdNew: () => {
-      const ceiling = settings.get().dailyModelCents;
+      const ceiling = operatorDailyModelCents();
       if (!(ceiling > 0)) return null;
       const day = new Date(); day.setHours(0, 0, 0, 0);
       const used = books().entries({}).filter((entry) => entry.kind === "shadow" && entry.at >= day.getTime()).reduce((sum, entry) => sum + entry.cents, 0);
       if (used < ceiling) { store.resolve(null, "daily_ceiling"); return null; }
-      store.raise(null, "daily_ceiling", `today's model use reached the owner's ceiling of $${(ceiling / 100).toFixed(2)}; new sessions start again tomorrow`);
+      store.raise(null, "daily_ceiling", `today's model use reached the operator's ceiling of $${(ceiling / 100).toFixed(2)}; new sessions start again tomorrow`);
       return "the factory reached today's ceiling on model use";
     } });
     const scheduler = createScheduler({ book: books(), truth: evidence(), store, sessions, discovery: discoveryService(), dossiers: dossierService() });

@@ -199,7 +199,8 @@ Your own tests need no share split, but do need a clean ledger.
 
 1. License path: layer on official DuskBot and ask dusk.bot for an OEM or modify/distribute license before any public
    release — confirmed?
-2. Does the $100 deposit include model-token spend, or is intelligence billed separately?
+2. Does the $100 deposit include model-token spend, or is intelligence billed separately? **Answered: neither. Model
+   use is Cofactory's cost; the deposit is for real-world spend only.**
 3. Which rails are pre-connected for the first test (Stripe live KYC, registrar, email, socials, Vercel/GitHub)?
 4. Sending policy on day one: ask every time, or a small daily allow cap?
 5. Is ~$10k/month a per-company goal, a portfolio goal, or an idea-selection filter only?

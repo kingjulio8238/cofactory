@@ -1,12 +1,12 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createCofactoryHost } from "./host.ts";
 
 const cleanups: Array<() => void> = [];
-afterEach(() => { for (const done of cleanups.splice(0).reverse()) done(); });
+afterEach(() => { vi.unstubAllEnvs(); for (const done of cleanups.splice(0).reverse()) done(); });
 
 function host() {
   const dir = mkdtempSync(join(tmpdir(), "cofactory-approvals-"));
@@ -64,9 +64,9 @@ describe("what waits for the owner's OK", () => {
     expect(book.company(company.id)!.status).toBe("killed");
   });
 
-  it("starts no new session once today's model use reaches the owner's ceiling", async () => {
+  it("starts no new session once today's model use reaches the operator's ceiling", async () => {
+    vi.stubEnv("COFACTORY_DAILY_MODEL_CENTS", "100");
     const { cofactory } = host();
-    cofactory.settings.set({ dailyModelCents: 100 });
     const staffed = await cofactory.runtime()!.launcher!.staffFactory();
     const scout = staffed.find((seat) => seat.role === "scout")!.botId;
     cofactory.costBooked({ botId: scout, usd: 1.5, botName: "Factory Scout" });

@@ -196,7 +196,7 @@ export function StakeStep({ budgetCents, capCents, allocation, closeAfterDays, o
   );
   return (
     <StepFrame art={<CrewArt crew={[{ role: "ceo", state: "done" }, { role: "builder" }, { role: "marketer" }]} size={56} />} title="Fund your factory" wide
-      sub="What it can spend this month on real things like domains, ads and payment fees. AI use runs on your own plan."
+      sub="What it can spend this month on real things like domains, ads and payment fees. The AI work is on us."
       footer={<>
         <ErrorLine text={error} />
         <button type="button" data-primary="" data-stake-next="" disabled={Boolean(problem) || busy} onClick={() => void save()} className={PRIMARY}>Continue</button>
