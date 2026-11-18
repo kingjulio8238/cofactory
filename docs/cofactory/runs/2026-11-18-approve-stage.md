@@ -62,6 +62,49 @@ $25.
 4. **The scout didn't close its own search.** It ended its session without closing the search. The runtime now closes a
    complete search itself (`f74a100e6`).
 
+## After the fixes: a second run (`bd6903a90`)
+
+**What was fixed:**
+- **Hours:** an hourly price needs its hours quoted from a page.
+- **Vendor pages:** a vendor's pages never count as buyers talking, and a card needs buyers' words on two sites that
+  aren't vendors.
+- **Price kind:** a card says who set today's price.
+- **Risk fields:** the platform risk is a named platform and term, or none.
+
+**Checking run 1's cards:** run 1's three cards are rejected under the new rules. Two have unsourced hours, and all
+three have only one non-vendor buyer site.
+
+**Second run:** a fresh factory with six new industries (pet retail, software, nurseries, title offices, apparel
+contractors, meat wholesale), same settings.
+
+| Step | Run 1 | Run 2 |
+|---|---|---|
+| Search of 8 ideas | 35 min, $6.18 | 89 min, $16.14 (two sessions; the scout fanned out to 51 subagents before recording anything) |
+| First card | 40 min, $6.99 | 95 min; the card itself took 6 min and $1.05 |
+| All three cards | 48 min, $8.42 | 116 min, $19.80 |
+| A card failed, then fixed | none | NurseryClear: v1 and v2 refused (one non-vendor buyer site); v3 added a checked buyer quote and passed |
+
+**The three cards:**
+- **CloseGuard Verify:** wire-fraud and seller-ID checks for one- and two-person Ohio title shops.
+  - **Price:** labelled honestly as *CertifID's list price*, $48 a closing. We'd charge $14.
+  - **Buyer evidence:** a BiggerPockets thread and a job post.
+- **NurseryClear:** phytosanitary paperwork done right for small nurseries. $50 a shipment today; $15 from us.
+  - **Buyer evidence:** a growing forum and a Q&A site, the second added by the scout when its first two tries were
+    refused.
+- **PackReady:** factory-ready tech packs for solo apparel founders.
+  - **Price:** a freelancer's $220 rate. We'd charge $65.
+  - **Buyer evidence:** three job posts.
+
+**What still isn't right:**
+1. **Search speed varies widely by run.** Run 2's scout researched for 37 minutes before recording a single quote. It
+   spent more than run 1's whole search, so it hit the $15 ceiling before the cards. That ceiling was raised to $22 for
+   this run only. A search should record as it goes, and the first search should be bounded by time.
+2. **Who set the price is the scout's own word.** NurseryClear's "a buyer says what they pay" is really a nursery's own
+   shipping fee. The only contradiction caught is a rival's site. A cheap second check could catch more: who wrote the
+   price's page, compared with the declared kind.
+3. **Cards cost more under the stricter rules:** $1.05 and $2.08 against $0.59. That is the price of the evidence the
+   owner asked for.
+
 ## How to review
 
 - **The pages:** open http://127.0.0.1:5398 while the view server runs (factory icon → Home). The factory's runtime is
