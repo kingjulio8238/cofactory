@@ -6,6 +6,18 @@ export interface Cited {
   quote: string;
 }
 
+/** Hours of work, quoted from a page: what turns an hourly rate into a monthly price. */
+export interface CitedHours extends Cited {
+  amount: number;
+  per: "week" | "month";
+}
+
+/** The hours a month a sourced figure states, or undefined without one. */
+export function hoursPerMonthOf(hours: Pick<CitedHours, "amount" | "per"> | undefined): number | undefined {
+  if (!hours) return undefined;
+  return hours.per === "month" ? hours.amount : (hours.amount * 52) / 12;
+}
+
 /** A dossier: the one-page case for a niche, built so that code can check every claim in it. */
 export interface DossierBody {
   /** 5–10 named buyers: a page proving each exists, and a public way to reach them. */
@@ -24,7 +36,7 @@ export interface DossierBody {
     licensedAdvice: boolean;
     regulatedClaims: boolean;
     /** A platform or marketplace whose terms the business would break, or null. */
-    platformTos: string | null;
+    platformTos: { platform: string; rule: string } | null;
     /** Share of distribution or revenue through one intermediary that can review, delay or ban (0..1). */
     gatekeeperShare: number;
     /** The buyer cannot pay without procurement, a committee or an RFP. */
@@ -36,13 +48,13 @@ export interface DossierBody {
     priceCents: number;
     per: "month" | "year" | "job";
     /** What the buyer pays for the human alternative, with the source. */
-    humanAlternative: Cited & { amountCents: number; per: "month" | "year" | "job" | "hour"; hoursPerMonth?: number };
+    humanAlternative: Cited & { amountCents: number; per: "month" | "year" | "job" | "hour"; hours?: CitedHours };
     /** Estimated cost to serve the heaviest tenth of customers, per billing period. */
     costToServeCents: number;
   };
 }
 
-export type ClaimRole = "buyer" | "contact" | "pain" | "spend" | "buyer_count" | "incumbent" | "human_alternative";
+export type ClaimRole = "buyer" | "contact" | "pain" | "spend" | "buyer_count" | "incumbent" | "human_alternative" | "hours";
 
 export interface ClaimResult {
   role: ClaimRole;

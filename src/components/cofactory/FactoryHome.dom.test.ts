@@ -8,7 +8,7 @@ const card = (id: string, status: string, extra: Record<string, unknown> = {}) =
     id, status, companyId: null, note: null, ...extra,
     body: {
       name: `Company ${id}`, headline: "Your monthly DIR fee report, done for you",
-      priceToday: { url: "https://jobs-site.test/jobs", quote: "Budget: $600 per month", amountCents: 60_000, per: "month" },
+      priceToday: { url: "https://jobs-site.test/jobs", quote: "Budget: $600 per month", amountCents: 60_000, per: "month", kind: "job_post_budget" },
       offer: { priceCents: 15_000, per: "month" },
       rival: { name: "RemitCheck", url: "https://vendor-site.test/pricing", whatTheyMiss: "only sells to chains", priceCents: 4_900 },
       exampleBuyer: { name: "Riverside Pharmacy 1", url: "https://buyers-site.test/buyer-1" },
@@ -17,6 +17,12 @@ const card = (id: string, status: string, extra: Record<string, unknown> = {}) =
   niche: { buyer: "independent pharmacies in Ohio", job: "DIR fee reports", channel: "association forum" },
   quotes: [{ url: "https://forum-site.test/thread-1", site: "forum-site.test", quote: "it eats a whole weekend" }, { url: "https://qa-site.test/thread-2", site: "qa-site.test", quote: "we do it by hand" }],
 });
+
+const hourlyCard = (id: string) => {
+  const entry = card(id, "ready");
+  entry.card.body.priceToday = { url: "https://bookkeepers-site.test/rate", quote: "$75 per hour", amountCents: 7_500, per: "hour", kind: "service_rate", hours: { url: "https://bookkeepers-site.test/hours", amount: 12, per: "month" } } as never;
+  return entry;
+};
 
 const f = vi.hoisted(() => ({
   posts: [] as Array<{ path: string; body: unknown }>,
@@ -58,7 +64,7 @@ describe("the factory's Home", () => {
     expect(host.querySelector("[data-pick-search]")!.textContent).toBe("Your scout is searching: 5 of 8 ideas so far, from 14 quotes on 9 sites.");
     expect(host.querySelector("[data-pick-writing]")!.textContent).toBe("Checking the evidence: biosecurity logbooks, for hatcheries");
     const [first] = host.querySelectorAll<HTMLElement>("[data-pick-card]");
-    expect(first!.textContent).toContain("Buyers pay$600/mo today");
+    expect(first!.textContent, "says who set the price").toContain("Buyers budget$600/mo · See the source");
     expect(first!.textContent).toContain("We charge$150/mo");
     expect(first!.querySelector("[data-pick-evidence]"), "the evidence opens on request").toBeNull();
     await act(async () => { button(first!, "See the evidence").click(); });
@@ -81,12 +87,13 @@ describe("the factory's Home", () => {
   it("says what became of a started card, opens a launched company's CEO, and keeps Start off when the money is short", async () => {
     openFactoryHome();
     const host = await show({ ...base, search: { state: "idle", niches: 0, target: 0, signals: 0, sites: 0 }, startProblem: "fund the factory first",
-      cards: [card("s", "started", { note: "not enough unallocated money" }), card("d", "launched", { companyId: "co-1" }), card("u", "unconfirmed", { note: "the buyer count does not check out" }), card("r", "ready")] });
+      cards: [card("s", "started", { note: "not enough unallocated money" }), card("d", "launched", { companyId: "co-1" }), card("u", "unconfirmed", { note: "the buyer count does not check out" }), hourlyCard("r")] });
     expect(host.querySelector("h1")!.textContent).toBe("Pick your next company");
     const [started, launched, unconfirmed, ready] = host.querySelectorAll<HTMLElement>("[data-pick-card]");
     expect(started!.textContent).toContain("It opens by itself once the full research holds up. Waiting on: not enough unallocated money.");
     expect(unconfirmed!.textContent).toContain("Couldn't confirm it: the buyer count does not check out. No money moved.");
     expect(button(ready!, "Start with $50").disabled).toBe(true);
+    expect(ready!.textContent, "an hourly price shows its sourced hours").toContain("Providers charge$75/h × 12 h a month · See the source");
     expect(ready!.textContent).toContain("You can't start one yet: fund the factory first.");
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     await act(async () => { button(launched!, "Open Company d").click(); });

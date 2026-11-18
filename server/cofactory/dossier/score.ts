@@ -1,6 +1,6 @@
 import { BUYER_VOICE_SOURCES, type Niche } from "../../../shared/cofactory/discovery.ts";
 import { nicheSimilarity } from "../discovery/similarity.ts";
-import type { DossierBody, DossierPolicy, QaReport, ScoreReport, VerificationReport, Veto } from "../../../shared/cofactory/dossier.ts";
+import { hoursPerMonthOf, type DossierBody, type DossierPolicy, type QaReport, type ScoreReport, type VerificationReport, type Veto } from "../../../shared/cofactory/dossier.ts";
 
 /** A price as cents per month; null when it cannot be put on a monthly basis (an hourly rate with no hours). */
 export function monthlyCents(cents: number, per: "month" | "year" | "job" | "hour", hoursPerMonth?: number): number | null {
@@ -32,14 +32,14 @@ export function scoreDossier(input: {
 
   if (body.risks.licensedAdvice) veto("licensed_advice", "the work is advice only a licensed professional may give");
   if (body.risks.regulatedClaims) veto("regulated_claims", "selling it means making regulated claims");
-  if (body.risks.platformTos) veto("platform_tos", `it would break ${body.risks.platformTos}'s terms`);
+  if (body.risks.platformTos) veto("platform_tos", `it would break ${body.risks.platformTos.platform}'s terms: ${body.risks.platformTos.rule}`);
   if (body.risks.gatekeeperShare > 0.5) veto("gatekeeper", `${Math.round(body.risks.gatekeeperShare * 100)}% of distribution or revenue runs through one gatekeeper`);
   const ours = monthlyCents(body.offer.priceCents, body.offer.per);
   if (body.risks.procurement) veto("procurement", "the buyer cannot pay without procurement or a committee");
   else if (ours !== null && ours > policy.cardLimitCentsPerMonth) veto("procurement", `at ${ours / 100} dollars a month it is no longer one person's card decision`);
   if (!verification.pass) veto("unverified", [...verification.criticalFailures, ...verification.structural, `${Math.round(verification.verifiedShare * 100)}% of claims verified`].join("; "));
   if (!qa.pass) veto("qa", `${qa.unknown} of ${qa.questions.length} questions unknown`);
-  const theirs = ok("human_alternative") ? monthlyCents(body.offer.humanAlternative.amountCents, body.offer.humanAlternative.per, body.offer.humanAlternative.hoursPerMonth) : null;
+  const theirs = ok("human_alternative") ? monthlyCents(body.offer.humanAlternative.amountCents, body.offer.humanAlternative.per, hoursPerMonthOf(body.offer.humanAlternative.hours)) : null;
   const ratio = ours !== null && theirs ? ours / theirs : null;
   if (ratio === null) veto("price_ratio", "our price cannot be compared with a verified human alternative");
   else if (ratio > policy.maxPriceRatio) veto("price_ratio", `our price is ${Math.round(ratio * 100)}% of the human alternative; it must be at most a third`);

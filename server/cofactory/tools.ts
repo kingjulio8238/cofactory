@@ -34,7 +34,7 @@ import type { Sprints } from "./validation/sprints.ts";
 import { createInvoice, createPaymentLink, renderOfferPage } from "./validation/offer.ts";
 import { fileInside, runbookProblem, type Orders } from "./validation/orders.ts";
 import { OUTREACH_CHANNELS } from "../../shared/cofactory/validation.ts";
-import { SIGNAL_KINDS, SOURCE_TYPES } from "../../shared/cofactory/discovery.ts";
+import { PRICE_KINDS, SIGNAL_KINDS, SOURCE_TYPES } from "../../shared/cofactory/discovery.ts";
 import type { DecisionKind, EvidenceLink } from "../../shared/cofactory/observe.ts";
 import type { Session } from "../../shared/cofactory/runtime.ts";
 
@@ -61,19 +61,34 @@ const evidence = z.object({
 const cents = z.number().int().positive().max(100_000_000);
 const cited = z.object({ url: z.string().url().max(2_000), quote: z.string().min(6).max(1_500) });
 const per = z.enum(["month", "year", "job", "hour"]);
+const hours = cited.extend({
+  amount: z.number().positive().max(744).describe("The number of hours, exactly as the quote states it"),
+  per: z.enum(["week", "month"]),
+}).describe("Required for an hourly price: a page stating how many hours of this work a buyer needs. Never an estimate of your own.");
+const sourceType = z.enum(SOURCE_TYPES).describe("Where the quote was found. review: a review platform where buyers rate a product. vendor: a page by a company selling into this job (its marketing, case studies, testimonials); it never counts as buyers talking.");
 const dossierBody = z.object({
   buyers: z.array(z.object({ name: z.string().min(2).max(200), url: z.string().url().max(2_000), contactUrl: z.string().url().max(2_000), whyFit: z.string().max(500) })).max(15),
-  pains: z.array(cited.extend({ sourceType: z.enum(SOURCE_TYPES) })).max(20),
+  pains: z.array(cited.extend({ sourceType })).max(20),
   spend: z.array(cited.extend({ amountCents: z.number().int().nonnegative(), per })).max(10),
   buyerCount: cited.extend({ value: z.number().int().nonnegative() }),
   incumbents: z.array(z.object({ name: z.string().min(1).max(200), url: z.string().url().max(2_000), whatTheyMiss: z.string().max(1_000), priceCents: z.number().int().nonnegative().nullable() })).max(10),
   gap: z.object({ why: z.string().max(2_000), hiddenReasonsRuledOut: z.string().max(2_000) }),
   firstTen: z.object({ channel: z.string().max(300), steps: z.string().max(3_000) }),
   failureModes: z.array(z.string().max(500)).max(10),
-  risks: z.object({ licensedAdvice: z.boolean(), regulatedClaims: z.boolean(), platformTos: z.string().max(200).nullable(), gatekeeperShare: z.number().min(0).max(1), procurement: z.boolean(), notes: z.string().max(2_000) }),
+  risks: z.object({
+    licensedAdvice: z.boolean().describe("true only if the work itself is advice a licensed professional must give"),
+    regulatedClaims: z.boolean().describe("true only if selling it means making claims a regulator governs"),
+    platformTos: z.object({
+      platform: z.string().min(2).max(60).describe("The platform's name, e.g. \"Amazon Seller Central\""),
+      rule: z.string().min(10).max(300).describe("The term the business would break, quoted or named"),
+    }).nullable().describe("null unless the business would break a named platform's terms. Doubts and checks to make go in notes, never here."),
+    gatekeeperShare: z.number().min(0).max(1).describe("Share of distribution or revenue through one intermediary that can review, delay or ban, 0 to 1"),
+    procurement: z.boolean().describe("true only if the buyer cannot pay without an RFP, a committee or vendor onboarding; a manager paying by card or invoice is false"),
+    notes: z.string().max(2_000).describe("Doubts, things to check, and why a regulated topic the work touches needs no licence"),
+  }),
   offer: z.object({
     archetype: z.enum(["done_for_you", "monitoring", "micro_tool", "templates", "directory"]), priceCents: z.number().int().positive(), per: z.enum(["month", "year", "job"]),
-    humanAlternative: cited.extend({ amountCents: z.number().int().positive(), per, hoursPerMonth: z.number().positive().optional() }),
+    humanAlternative: cited.extend({ amountCents: z.number().int().positive(), per, hours: hours.optional() }),
     costToServeCents: z.number().int().nonnegative(),
   }),
 });
@@ -290,7 +305,7 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     description: "Record one piece of demand evidence you found on a public page: a complaint, an 'I'd pay for', a 'why doesn't someone', a long-lived workaround, a job post with a budget, a regulation, a price, or a registry count. The quote must be copied word for word from the page (at least six words); it is fetched and checked, and refused if it is not there. Only recorded signals can back a niche.",
     roles: ["scout"],
     input: z.object({
-      url: z.string().url().max(2_000), quote: z.string().min(1).max(1_500), kind: z.enum(SIGNAL_KINDS), source_type: z.enum(SOURCE_TYPES),
+      url: z.string().url().max(2_000), quote: z.string().min(1).max(1_500), kind: z.enum(SIGNAL_KINDS), source_type: sourceType,
       buyer_hint: z.string().min(1).max(200), job_hint: z.string().min(1).max(300),
     }),
     async run(args, ctx) {
@@ -351,7 +366,8 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     name: "cofactory_submit_card",
     description: [
       "Submit the card for a niche picked for one: the short case the owner reads before saying Start. Every URL is fetched.",
-      "Needs: the company's name and a one-line headline; one price a buyer pays today for this job (amount_cents must be the amount in the quote);",
+      "Needs: the company's name and a one-line headline; one price paid today for this job and who sets it (amount_cents must be the amount in the quote; an hourly price needs the hours of work quoted from a page, never your estimate);",
+      "the buyers' own words on at least two sites that aren't vendors (the niche's signals count; add buyer_quotes if they fall short; a vendor's case studies and testimonials never count);",
       "one rival and what it misses; one real buyer who fits, with a page proving they exist; our offer, at most a third of today's price per month;",
       "and the risks (a licence or regulated claims rule it out; a regulated topic in your own words needs a note saying why none is involved).",
       "The niche's recorded signals are shown as the buyers' own words. A failed card can be fixed and resubmitted.",
@@ -359,7 +375,12 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
     roles: ["scout"],
     input: z.object({
       niche_id: z.string().min(1), name: z.string().min(2).max(80), headline: z.string().min(10).max(200),
-      price_today: cited.extend({ amount_cents: z.number().int().positive(), per, hours_per_month: z.number().positive().max(744).optional() }),
+      price_today: cited.extend({
+        amount_cents: z.number().int().positive(), per,
+        kind: z.enum(PRICE_KINDS).describe("Who sets this price: vendor_list_price (a rival's or vendor's published price), service_rate (a provider's rate for doing the work), job_post_budget (a buyer's posted budget), buyer_statement (a buyer saying what they pay, on a page that isn't the vendor's)"),
+        hours: hours.optional(),
+      }),
+      buyer_quotes: z.array(cited.extend({ source_type: sourceType })).max(5).default([]).describe("More of the buyers' own words if the niche's signals have fewer than two sites that aren't vendors"),
       offer: z.object({ price_cents: z.number().int().positive(), per: z.enum(["month", "year", "job"]) }),
       rival: z.object({ name: z.string().min(1).max(120), url: z.string().url().max(2_000), what_they_miss: z.string().min(10).max(500), price_cents: z.number().int().positive().nullable().default(null) }),
       example_buyer: z.object({ name: z.string().min(1).max(200), url: z.string().url().max(2_000) }),
@@ -369,7 +390,8 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
       if (!ctx.cards) return refused("cards are not running");
       const result = await ctx.cards.submit(args.niche_id, {
         name: args.name.trim(), headline: args.headline.trim(),
-        priceToday: { url: args.price_today.url, quote: args.price_today.quote, amountCents: args.price_today.amount_cents, per: args.price_today.per, ...(args.price_today.hours_per_month ? { hoursPerMonth: args.price_today.hours_per_month } : {}) },
+        priceToday: { url: args.price_today.url, quote: args.price_today.quote, amountCents: args.price_today.amount_cents, per: args.price_today.per, kind: args.price_today.kind, ...(args.price_today.hours ? { hours: args.price_today.hours } : {}) },
+        buyerQuotes: args.buyer_quotes.map((quote) => ({ url: quote.url, quote: quote.quote, sourceType: quote.source_type })),
         offer: { priceCents: args.offer.price_cents, per: args.offer.per },
         rival: { name: args.rival.name, url: args.rival.url, whatTheyMiss: args.rival.what_they_miss, priceCents: args.rival.price_cents },
         exampleBuyer: args.example_buyer,
@@ -389,7 +411,8 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
       "Needs: 5-10 buyers (a page proving each exists and a public contact page); at least 5 practitioner pain quotes from buyers' own pages on 2+ sites and 2+ kinds of source (forums, reviews, Q&A; job ads may be at most half, since they show spend, not pain);",
       "what buyers spend today (amountCents must be the amount in the quote); the buyer count (value must be the number in its quote); incumbents and what they miss;",
       "why the gap exists and which hidden reasons (monopoly, regulation) you ruled out; a concrete plan for the first ten customers; 3+ specific failure modes;",
-      "risks; and the offer, whose price must be at most a third of the human alternative (cited) with at least half the price left after the cost to serve the heaviest customer.",
+      "risks; and the offer, whose price must be at most a third of the human alternative (cited; an hourly one needs its hours of work quoted from a page) with at least half the price left after the cost to serve the heaviest customer.",
+      "Quotes on an incumbent's own site are its marketing and never count as buyers talking.",
       "It is then asked 10 random questions answered only from verified evidence (more than 3 unknown fails), and scored. A failed dossier can be fixed and resubmitted.",
     ].join(" "),
     roles: ["scout"],

@@ -12,7 +12,7 @@ afterEach(() => { vi.unstubAllEnvs(); for (const done of cleanups.splice(0).reve
 
 const goodCard = (name = "Riverside Recon") => ({
   name, headline: "Your monthly DIR fee report, done for you, for one-store pharmacies",
-  price_today: { url: "https://jobs-site.test/jobs", quote: "Budget: $600 per month, fixed price, long term.", amount_cents: 60_000, per: "month" },
+  price_today: { url: "https://jobs-site.test/jobs", quote: "Budget: $600 per month, fixed price, long term.", amount_cents: 60_000, per: "month", kind: "job_post_budget" },
   offer: { price_cents: 15_000, per: "month" },
   rival: { name: "RemitCheck Enterprise", url: "https://vendor-site.test/pricing", what_they_miss: "sells software to chains of 25+ stores; one-store owners still do the work", price_cents: 4_900 },
   example_buyer: { name: "Riverside Pharmacy 1", url: "https://buyers-site.test/buyer-1" },
@@ -84,9 +84,9 @@ describe("cards: the owner picks companies before any is started", () => {
     const failed = await f.call(f.scout, "cofactory_submit_card", { niche_id: f.strong, ...wrongAmount, offer: { price_cents: 45_000, per: "month" }, rival: { ...goodCard().rival, url: "https://gone-site.test/nothing" } });
     expect(failed.structuredContent).toMatchObject({ status: "failed", version: 1 });
     expect(failed.structuredContent!.problems).toEqual([
-      "the price buyers pay today is not the amount its quote states",
+      "today's price is not the amount its quote states",
       expect.stringMatching(/^the rival's page does not check out/),
-      "our price is 50% of what buyers pay today; it must be at most a third",
+      "our price is 50% of today's price; it must be at most a third",
     ]);
     const regulated = await f.call(f.scout, "cofactory_submit_card", { niche_id: f.strong, ...goodCard(), headline: "Tax filings for one-store pharmacies, done for you" });
     expect(regulated.structuredContent!.problems).toEqual([expect.stringContaining("the work touches tax")]);
@@ -96,7 +96,7 @@ describe("cards: the owner picks companies before any is started", () => {
     expect(ready.structuredContent).toMatchObject({ status: "ready", version: 3, problems: [] });
     expect(f.told).toEqual(["Riverside Recon is ready for you to look at: Your monthly DIR fee report, done for you, for one-store pharmacies"]);
     const card = f.cofactory.cards().latest(f.strong)!;
-    expect(f.cofactory.cards().view(card).quotes.map((quote) => quote.site), "one buyer quote per site").toEqual(["forum-site.test", "jobs-site.test", "board-site.test"]);
+    expect(f.cofactory.cards().view(card).quotes.map((quote) => quote.site), "buyers' own words, one per site; the regulator's page is not one").toEqual(["forum-site.test", "jobs-site.test", "qa-site.test"]);
     expect(await f.call(f.scout, "cofactory_submit_card", { niche_id: f.strong, ...goodCard() }), "a ready card is final").toMatchObject({ isError: true });
     expect(await f.call(f.scout, "cofactory_submit_card", { niche_id: f.weak, ...goodCard() }), "only a niche picked for a card gets one").toMatchObject({ isError: true });
 
@@ -110,6 +110,27 @@ describe("cards: the owner picks companies before any is started", () => {
     expect(f.cofactory.discovery().store.openBatch()).toBeNull();
     expect([f.strong, f.middle, f.weak].map((id) => f.cofactory.discovery().store.niche(id)!.status)).toEqual(["card", "card", "candidate"]);
     expect(f.started.some((text) => text.includes("Write the card for")), "and the scout is woken for the first card").toBe(true);
+  });
+
+  it("holds a card to sourced hours, buyers' words from sites that aren't vendors, and an honest account of who sets today's price", async () => {
+    const f = await factory();
+    await f.call(f.scout, "cofactory_close_batch");
+    const submit = async (overrides: Record<string, unknown>) => ((await f.call(f.scout, "cofactory_submit_card", { niche_id: f.strong, ...goodCard(), ...overrides })).structuredContent!.problems as string[]);
+    const hourly = { url: "https://bookkeepers-site.test/rate", quote: "Our bookkeepers charge $75 per hour for remit reconciliation.", amount_cents: 7_500, per: "hour", kind: "service_rate" };
+
+    expect(await submit({ price_today: hourly }), "an hourly rate needs quoted hours").toEqual(["today's price is an hourly rate with no quoted hours of work, so it cannot be put on a monthly basis", "our price cannot be compared with today's price"]);
+    expect(await submit({ price_today: { ...hourly, hours: { url: "https://bookkeepers-site.test/hours", quote: "Reconciling one store's remits by hand takes about 12 hours a month.", amount: 20, per: "month" } } }))
+      .toContain("the hours behind today's price (20) are not the number their quote states");
+
+    // with the rival on the forum's site and a vendor's price on the job board's, only the Q&A site still speaks for buyers
+    const onRival = await submit({ rival: { ...goodCard().rival, url: "https://forum-site.test/rival" }, price_today: { ...goodCard().price_today, kind: "vendor_list_price" } });
+    expect(onRival).toContain("the buyers' own words come from 1 site(s) that aren't vendors; a card needs 2 (forums, Q&A, job posts or review platforms, not a vendor's case studies or testimonials)");
+    expect(await submit({ price_today: { url: "https://vendor-site.test/pricing", quote: "Starts at $49 per store per month, billed annually.", amount_cents: 4_900, per: "month", kind: "buyer_statement" }, offer: { price_cents: 1_500, per: "month" } }))
+      .toContain("a price on the rival's own site is its list price, not a buyer saying what they pay");
+
+    const sourced = await f.call(f.scout, "cofactory_submit_card", { niche_id: f.strong, ...goodCard(), offer: { price_cents: 25_000, per: "month" },
+      price_today: { ...hourly, hours: { url: "https://bookkeepers-site.test/hours", quote: "Reconciling one store's remits by hand takes about 12 hours a month.", amount: 12, per: "month" } } });
+    expect(sourced.structuredContent, "$75/h × 12 h = $900/mo, against our $250/mo").toMatchObject({ status: "ready", problems: [] });
   });
 
   it("starts a company only after the owner's Start and a clean full dossier; a pass teaches the next search; nothing moves money until then", async () => {

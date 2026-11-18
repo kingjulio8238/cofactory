@@ -153,7 +153,7 @@ export function scoringSuite(): Suite {
         const vetoCases: Array<[string, ReturnType<typeof score>]> = [
           ["licensed_advice", score((body) => { body.risks.licensedAdvice = true; })],
           ["regulated_claims", score((body) => { body.risks.regulatedClaims = true; })],
-          ["platform_tos", score((body) => { body.risks.platformTos = "Amazon Seller Central"; })],
+          ["platform_tos", score((body) => { body.risks.platformTos = { platform: "Amazon Seller Central", rule: "no off-platform contact with buyers" }; })],
           ["gatekeeper", score((body) => { body.risks.gatekeeperShare = 0.8; })],
           ["procurement", score((body) => { body.risks.procurement = true; })],
           ["procurement", score((body) => { body.offer.priceCents = 900_00 * 10; })],

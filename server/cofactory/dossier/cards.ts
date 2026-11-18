@@ -1,11 +1,15 @@
 import { randomUUID } from "node:crypto";
 
-import type { Card, CardBody, Niche } from "../../../shared/cofactory/discovery.ts";
-import { DEFAULT_DOSSIER_POLICY, type DossierPolicy } from "../../../shared/cofactory/dossier.ts";
+import { BUYER_VOICE_SOURCES, type Card, type CardBody, type Niche } from "../../../shared/cofactory/discovery.ts";
+import { DEFAULT_DOSSIER_POLICY, hoursPerMonthOf, type DossierPolicy } from "../../../shared/cofactory/dossier.ts";
+import { siteOf } from "../discovery/discovery.ts";
 import type { DiscoveryStore } from "../discovery/store.ts";
 import type { Truth } from "../truth/store.ts";
 import { monthlyCents, preScore } from "./score.ts";
-import { amountsIn, unexplainedTopics } from "./verify.ts";
+import { amountsIn, hoursProblems, unexplainedTopics } from "./verify.ts";
+
+/** Sites, none of them a vendor's, whose buyers speak for themselves on a card. */
+const MIN_VOICES = 2;
 
 /** Niches in a search: small, so the owner sees cards soon. COFACTORY_FIRST_SEARCH_NICHES changes it (tests). */
 export function searchSize(): number {
@@ -44,30 +48,49 @@ export function createCards(deps: CardDeps) {
   const now = deps.now ?? Date.now;
   const latest = (nicheId: string): Card | null => store.cardsOf(nicheId).at(-1) ?? null;
 
-  function quotesOf(niche: Niche): CardView["quotes"] {
-    const seen = new Set<string>();
-    return niche.signalIds.map((id) => store.signal(id)).filter((signal) => signal !== null).filter((signal) => !seen.has(signal.site) && Boolean(seen.add(signal.site)))
-      .slice(0, 3).map((signal) => ({ url: signal.url, site: signal.site, quote: signal.quote, sourceType: signal.sourceType }));
+  /** The sites of everyone selling into the job on this card: the rival, and whoever set today's price if they sell it. */
+  const vendorSites = (body: CardBody): Set<string> =>
+    new Set([siteOf(body.rival.url), ...(body.priceToday.kind === "vendor_list_price" || body.priceToday.kind === "service_rate" ? [siteOf(body.priceToday.url)] : [])]);
+
+  /**
+   * The buyers' own words behind a card, one per site: the niche's buyer-voice signals and the card's own checked quotes,
+   * never a page on a vendor's site, whatever source type it was filed under.
+   */
+  function voicesOf(niche: Niche, body: CardBody, checks: Card["checks"]): CardView["quotes"] {
+    const vendors = vendorSites(body), seen = new Set<string>();
+    const fromSignals = niche.signalIds.map((id) => store.signal(id)).filter((signal) => signal !== null)
+      .map((signal) => ({ url: signal.url, site: signal.site, quote: signal.quote, sourceType: signal.sourceType as string }));
+    const fromCard = (body.buyerQuotes ?? []).filter((quote) => checks.some((item) => item.role === "quote" && item.url === quote.url && item.verdict === "verified"))
+      .map((quote) => ({ url: quote.url, site: siteOf(quote.url), quote: quote.quote, sourceType: quote.sourceType as string }));
+    return [...fromSignals, ...fromCard]
+      .filter((quote) => (BUYER_VOICE_SOURCES as readonly string[]).includes(quote.sourceType) && !vendors.has(quote.site))
+      .filter((quote) => !seen.has(quote.site) && Boolean(seen.add(quote.site)));
   }
 
-  async function check(body: CardBody, subject: string): Promise<{ checks: Card["checks"]; problems: string[] }> {
-    const claims = [
-      { role: "price" as const, url: body.priceToday.url, quote: body.priceToday.quote },
-      { role: "rival" as const, url: body.rival.url, quote: null },
-      { role: "buyer" as const, url: body.exampleBuyer.url, quote: null },
+  async function check(niche: Niche, body: CardBody, subject: string): Promise<{ checks: Card["checks"]; problems: string[] }> {
+    const claims: Array<{ role: Card["checks"][number]["role"]; url: string; quote: string | null }> = [
+      { role: "price", url: body.priceToday.url, quote: body.priceToday.quote },
+      ...(body.priceToday.hours ? [{ role: "hours" as const, url: body.priceToday.hours.url, quote: body.priceToday.hours.quote }] : []),
+      { role: "rival", url: body.rival.url, quote: null },
+      { role: "buyer", url: body.exampleBuyer.url, quote: null },
+      ...(body.buyerQuotes ?? []).map((quote) => ({ role: "quote" as const, url: quote.url, quote: quote.quote })),
     ];
     const results = await Promise.all(claims.map((claim) => truth.checkClaim({ url: claim.url, quote: claim.quote, subject })));
     const checks = claims.map((claim, index) => ({ role: claim.role, url: claim.url, verdict: results[index]!.verdict, checkId: results[index]!.checkId ?? null }));
-    const verified = (role: Card["checks"][number]["role"]) => checks.find((item) => item.role === role)!.verdict === "verified";
+    const verdict = (role: Card["checks"][number]["role"]) => checks.find((item) => item.role === role)?.verdict ?? "missing";
     const problems: string[] = [];
-    if (!verified("price")) problems.push(`what buyers pay today does not check out on its page (${checks[0]!.verdict})`);
-    else if (!amountsIn(body.priceToday.quote).includes(body.priceToday.amountCents)) problems.push("the price buyers pay today is not the amount its quote states");
-    if (!verified("rival")) problems.push(`the rival's page does not check out (${checks[1]!.verdict})`);
-    if (!verified("buyer")) problems.push(`the example buyer's page does not check out (${checks[2]!.verdict})`);
+    if (verdict("price") !== "verified") problems.push(`today's price does not check out on its page (${verdict("price")})`);
+    else if (!amountsIn(body.priceToday.quote).includes(body.priceToday.amountCents)) problems.push("today's price is not the amount its quote states");
+    if (body.priceToday.kind === "buyer_statement" && siteOf(body.priceToday.url) === siteOf(body.rival.url)) problems.push("a price on the rival's own site is its list price, not a buyer saying what they pay");
+    problems.push(...hoursProblems(body.priceToday, verdict("hours") === "verified", "today's price"));
+    if (verdict("rival") !== "verified") problems.push(`the rival's page does not check out (${verdict("rival")})`);
+    if (verdict("buyer") !== "verified") problems.push(`the example buyer's page does not check out (${verdict("buyer")})`);
+    const voices = voicesOf(niche, body, checks);
+    if (voices.length < MIN_VOICES) problems.push(`the buyers' own words come from ${voices.length} site(s) that aren't vendors; a card needs ${MIN_VOICES} (forums, Q&A, job posts or review platforms, not a vendor's case studies or testimonials)`);
     const ours = monthlyCents(body.offer.priceCents, body.offer.per);
-    const theirs = monthlyCents(body.priceToday.amountCents, body.priceToday.per, body.priceToday.hoursPerMonth);
-    if (ours === null || !theirs) problems.push("our price cannot be compared with what buyers pay today");
-    else if (ours / theirs > policy.maxPriceRatio) problems.push(`our price is ${Math.round((ours / theirs) * 100)}% of what buyers pay today; it must be at most a third`);
+    const theirs = monthlyCents(body.priceToday.amountCents, body.priceToday.per, hoursPerMonthOf(body.priceToday.hours));
+    if (ours === null || !theirs) problems.push("our price cannot be compared with today's price");
+    else if (ours / theirs > policy.maxPriceRatio) problems.push(`our price is ${Math.round((ours / theirs) * 100)}% of today's price; it must be at most a third`);
     if (ours !== null && ours > policy.cardLimitCentsPerMonth) problems.push(`at ${ours / 100} dollars a month it is no longer one person's card decision`);
     if (body.risks.licensedAdvice || body.risks.regulatedClaims) problems.push("it needs a licence or makes regulated claims, which a factory does not run");
     else problems.push(...unexplainedTopics([body.headline, body.rival.whatTheyMiss].join("\n"), body.risks.notes));
@@ -91,7 +114,7 @@ export function createCards(deps: CardDeps) {
       if (niche.status !== "card") return { ok: false, reason: `the niche is ${niche.status}; only a niche picked for a card gets one` };
       const previous = latest(nicheId);
       if (previous && previous.status !== "failed") return { ok: false, reason: `its card is already ${previous.status}` };
-      const { checks, problems } = await check(body, `card:${nicheId}`);
+      const { checks, problems } = await check(niche, body, `card:${nicheId}`);
       const card: Card = {
         id: randomUUID(), nicheId, factoryId: niche.factoryId, version: (previous?.version ?? 0) + 1, at: now(), body, checks, problems,
         status: problems.length ? "failed" : "ready", decidedAt: null, passReason: null, companyId: null, note: null,
@@ -145,7 +168,7 @@ export function createCards(deps: CardDeps) {
     },
     view(card: Card): CardView {
       const niche = store.niche(card.nicheId)!;
-      return { card, niche: { id: niche.id, buyer: niche.buyer, job: niche.job, channel: niche.channel }, quotes: quotesOf(niche) };
+      return { card, niche: { id: niche.id, buyer: niche.buyer, job: niche.job, channel: niche.channel }, quotes: voicesOf(niche, card.body, card.checks).slice(0, 3) };
     },
   };
 }

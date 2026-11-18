@@ -37,7 +37,7 @@ describe("a factory's whole life on a real dusk server, every seat scripted", ()
     expect((await call("GET", "/api/cofactory/discovery")).batches, "and starts no second first search").toHaveLength(1);
     const pick = await call("GET", "/api/cofactory/cards");
     expect(pick).toMatchObject({ startCents: 5_000, startProblem: null });
-    expect(pick.cards[0].quotes.map((quote: { site: string }) => quote.site), "the buyers' own words, one site each").toEqual(["forum-site.test", "jobs-site.test", "board-site.test"]);
+    expect(pick.cards[0].quotes.map((quote: { site: string }) => quote.site), "the buyers' own words, one site each").toEqual(["forum-site.test", "jobs-site.test", "qa-site.test"]);
     expect((await call("GET", "/api/cofactory/rail")).factory.needs, "three cards wait for the owner").toBe(3);
     expect((await call("GET", `/api/cofactory/seat/${scout}`)).needsYou.alarms, "the lead's own alarms never ask the owner").toEqual([]);
     expect((await call("GET", "/api/cofactory/state")).companies).toHaveLength(0);

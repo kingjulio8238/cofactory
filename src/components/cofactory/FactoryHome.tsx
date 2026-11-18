@@ -11,6 +11,12 @@ import { WindowDragStrip } from "../DesktopCapabilities";
 import { useRail } from "../CompanyRail";
 
 type Per = "month" | "year" | "job" | "hour";
+type PriceKind = "vendor_list_price" | "service_rate" | "job_post_budget" | "buyer_statement";
+
+/** Who set today's price, so the card never passes a vendor's list price off as what buyers say they pay. */
+const PRICE_LABEL: Record<PriceKind, string> = {
+  vendor_list_price: "Rivals charge", service_rate: "Providers charge", job_post_budget: "Buyers budget", buyer_statement: "Buyers pay",
+};
 
 /** GET /api/cofactory/cards, as Home reads it. */
 export interface PickView {
@@ -22,7 +28,7 @@ export interface PickView {
       id: string; status: "ready" | "started" | "launched" | "unconfirmed"; companyId: string | null; note: string | null;
       body: {
         name: string; headline: string;
-        priceToday: { url: string; quote: string; amountCents: number; per: Per };
+        priceToday: { url: string; quote: string; amountCents: number; per: Per; kind?: PriceKind; hours?: { url: string; amount: number; per: "week" | "month" } };
         offer: { priceCents: number; per: Per };
         rival: { name: string; url: string; whatTheyMiss: string; priceCents: number | null };
         exampleBuyer: { name: string; url: string };
@@ -106,7 +112,12 @@ function PickCard({ entry, startCents, startProblem, onChanged }: { entry: PickV
         <p className="text-[14px] leading-5 text-ink/[0.8]">{body.headline}</p>
       </div>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[13px] leading-[18px]">
-        <dt className="text-ink/[0.56]">Buyers pay</dt><dd className="text-ink">{money(body.priceToday.amountCents, body.priceToday.per)} today · <Link url={body.priceToday.url}>See the source</Link></dd>
+        <dt className="text-ink/[0.56]">{body.priceToday.kind ? PRICE_LABEL[body.priceToday.kind] : "Today's price"}</dt>
+        <dd className="text-ink">
+          {money(body.priceToday.amountCents, body.priceToday.per)}
+          {body.priceToday.hours && <> × <Link url={body.priceToday.hours.url}>{`${body.priceToday.hours.amount} h a ${body.priceToday.hours.per}`}</Link></>}
+          {" · "}<Link url={body.priceToday.url}>See the source</Link>
+        </dd>
         <dt className="text-ink/[0.56]">We charge</dt><dd className="text-ink">{money(body.offer.priceCents, body.offer.per)}</dd>
         <dt className="text-ink/[0.56]">Rival</dt><dd className="text-ink">{body.rival.name}{body.rival.priceCents ? ` (from ${money(body.rival.priceCents)})` : ""}: {body.rival.whatTheyMiss}</dd>
       </dl>

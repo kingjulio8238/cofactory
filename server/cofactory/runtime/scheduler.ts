@@ -200,7 +200,7 @@ export function createScheduler(deps: SchedulerDeps) {
             const card = deps.cards?.latest(nicheId);
             if (card?.status !== "started") return [];
             const { body } = card;
-            return [`The owner chose this from its card, so build on it: ${body.name}, "${body.headline}"; buyers pay ${body.priceToday.amountCents} cents per ${body.priceToday.per} today (${body.priceToday.url}); rival ${body.rival.name} (${body.rival.url}) misses ${body.rival.whatTheyMiss}; example buyer ${body.exampleBuyer.name} (${body.exampleBuyer.url}); our offer ${body.offer.priceCents} cents per ${body.offer.per}.`];
+            return [`The owner chose this from its card, so build on it: ${body.name}, "${body.headline}"; today's price ${body.priceToday.amountCents} cents per ${body.priceToday.per} (${body.priceToday.kind ?? "price"}, ${body.priceToday.url}); rival ${body.rival.name} (${body.rival.url}) misses ${body.rival.whatTheyMiss}; example buyer ${body.exampleBuyer.name} (${body.exampleBuyer.url}); our offer ${body.offer.priceCents} cents per ${body.offer.per}.`];
           })(),
           previous ? `Previous dossier v${previous.version} was ${previous.status}: ${[...previous.verification.criticalFailures, ...previous.verification.structural, ...previous.verification.claims.filter((claim) => claim.verdict !== "verified").map((claim) => `${claim.role} ${claim.url} ${claim.verdict}`), ...(previous.score?.vetoes.map((item) => `veto ${item.veto}: ${item.why}`) ?? []), `${previous.qa.unknown} questions unknown`].join("; ")}` : "",
         ].filter(Boolean).join("\n"),

@@ -52,6 +52,9 @@ function generatedPage(path: string): string | null {
   if (contact) return `<html><body><h1>Contact Riverside Pharmacy ${contact[1]}</h1><p>Call us or write to the owner at owner${contact[1]}@riverside.test.</p>${FILLER}</body></html>`;
   const thread = /^\/thread-(\d+)$/.exec(path);
   if (thread) return `<html><body><h1>Thread ${thread[1]}</h1><p>Pharmacist ${thread[1]} wrote: reconciling the remits by hand eats a whole weekend every month for store number ${thread[1]}.</p>${FILLER}</body></html>`;
+  if (path === "/rate") return `<html><body><h1>Bookkeeping rates</h1><p>Our bookkeepers charge $75 per hour for remit reconciliation.</p>${FILLER}</body></html>`;
+  if (path === "/hours") return `<html><body><h1>Time spent on remits</h1><p>Reconciling one store's remits by hand takes about 12 hours a month.</p>${FILLER}</body></html>`;
+  if (path === "/case-study") return `<html><body><h1>Customer story</h1><p>Before our software, the pharmacy said reconciling remits by hand ate a whole weekend every month.</p>${FILLER}</body></html>`;
   if (path === "/registry") return `<html><body><h1>Licensed pharmacies</h1><p>There are 1,240 licensed independent community pharmacies in Ohio as of this report.</p>${FILLER}</body></html>`;
   return null;
 }

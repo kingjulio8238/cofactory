@@ -1,3 +1,5 @@
+import type { CitedHours } from "./dossier.ts";
+
 export const PROFILE_FIELDS = ["domains", "skills", "network", "assets", "geography", "languages", "interests"] as const;
 export type ProfileField = (typeof PROFILE_FIELDS)[number];
 
@@ -21,7 +23,11 @@ export interface FactoryProfile {
 export const SIGNAL_KINDS = ["complaint", "would_pay", "why_no_one", "workaround", "job_post", "regulation", "price", "registry"] as const;
 export type SignalKind = (typeof SIGNAL_KINDS)[number];
 
-export const SOURCE_TYPES = ["forum", "review", "job_board", "regulator", "registry", "social", "news", "marketplace", "qa", "other"] as const;
+/**
+ * Where a quote was found. `review` is a review platform where buyers rate a product; `vendor` is a page by a company that
+ * sells into the job (its marketing, case studies and testimonials), which is never the buyers' own voice.
+ */
+export const SOURCE_TYPES = ["forum", "review", "job_board", "regulator", "registry", "social", "news", "marketplace", "qa", "vendor", "other"] as const;
 export type SourceType = (typeof SOURCE_TYPES)[number];
 /** Sources where buyers speak for themselves, as opposed to reporters, vendors and regulators describing them. */
 export const BUYER_VOICE_SOURCES: readonly SourceType[] = ["forum", "review", "job_board", "qa", "social", "marketplace"];
@@ -121,8 +127,14 @@ export interface CardBody {
   name: string;
   /** What it sells, to whom, in one line. */
   headline: string;
-  /** What a buyer pays today for this job, quoted from its page. */
-  priceToday: { url: string; quote: string; amountCents: number; per: "month" | "year" | "job" | "hour"; hoursPerMonth?: number };
+  /** What is paid today for this job, quoted from its page, and who sets that price. */
+  priceToday: {
+    url: string; quote: string; amountCents: number; per: "month" | "year" | "job" | "hour"; kind: PriceKind;
+    /** For an hourly price: the hours of work it takes, quoted from a page, so the monthly figure rests on a source. */
+    hours?: CitedHours;
+  };
+  /** More of the buyers' own words than the niche's signals carry, each checked on its page. */
+  buyerQuotes?: Array<{ url: string; quote: string; sourceType: SourceType }>;
   offer: { priceCents: number; per: "month" | "year" | "job" };
   rival: { name: string; url: string; whatTheyMiss: string; priceCents: number | null };
   /** One real buyer who fits, with a page proving they exist. */
@@ -134,6 +146,10 @@ export interface CardBody {
  * `ready`: checked and waiting for the owner. `started`: the owner said Start; its full dossier is being researched and
  * it launches once that is shortlisted. `unconfirmed`: the full research did not hold up, so nothing launched.
  */
+/** Who sets a price today: a rival's list price, a provider's rate, a buyer's posted budget, or a buyer saying what they pay. */
+export const PRICE_KINDS = ["vendor_list_price", "service_rate", "job_post_budget", "buyer_statement"] as const;
+export type PriceKind = (typeof PRICE_KINDS)[number];
+
 export const CARD_STATUSES = ["failed", "ready", "started", "passed", "launched", "unconfirmed", "dismissed"] as const;
 export type CardStatus = (typeof CARD_STATUSES)[number];
 
@@ -144,7 +160,7 @@ export interface Card {
   version: number;
   at: number;
   body: CardBody;
-  checks: Array<{ role: "price" | "rival" | "buyer"; url: string; verdict: string; checkId: number | null }>;
+  checks: Array<{ role: "price" | "hours" | "rival" | "buyer" | "quote"; url: string; verdict: string; checkId: number | null }>;
   /** Why a failed card did not hold up; empty for a ready one. */
   problems: string[];
   status: CardStatus;

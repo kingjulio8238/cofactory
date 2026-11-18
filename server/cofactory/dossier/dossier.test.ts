@@ -148,3 +148,35 @@ describe("from dossier to company", () => {
     expect(preScore(niche, signals, [{ buyer: "dental practices", job: "appointment reminders" }])).toBe(fresh);
   });
 });
+
+describe("what a dossier's evidence must be", () => {
+  const verify = async (edit: (body: ReturnType<typeof goodDossier>) => void) => {
+    const dir = mkdtempSync(join(tmpdir(), "cofactory-verify-"));
+    const truth = openTruth(join(dir, "evidence"), { fetch: fixtureFetcher });
+    cleanups.push(() => { truth.close(); rmSync(dir, { recursive: true, force: true }); });
+    const body = goodDossier();
+    edit(body);
+    const { verifyDossier } = await import("./verify.ts");
+    const { DEFAULT_DOSSIER_POLICY } = await import("../../../shared/cofactory/dossier.ts");
+    return verifyDossier(truth, body, DEFAULT_DOSSIER_POLICY, "test", "monthly DIR fee reconciliation report");
+  };
+  const hourly = { url: "https://bookkeepers-site.test/rate", quote: "Our bookkeepers charge $75 per hour for remit reconciliation.", amountCents: 7_500, per: "hour" as const };
+
+  it("puts an hourly human alternative on a monthly basis only with hours quoted from a page", async () => {
+    expect((await verify((body) => { body.offer.humanAlternative = hourly; })).criticalFailures)
+      .toContain("the human alternative is an hourly rate with no quoted hours of work, so it cannot be put on a monthly basis");
+    const sourced = await verify((body) => {
+      body.offer.humanAlternative = { ...hourly, hours: { url: "https://bookkeepers-site.test/hours", quote: "Reconciling one store's remits by hand takes about 12 hours a month.", amount: 12, per: "month" } };
+    });
+    expect(sourced.criticalFailures).toEqual([]);
+    expect(sourced.claims.find((claim) => claim.role === "hours")).toMatchObject({ verdict: "verified" });
+  });
+
+  it("never counts a quote on an incumbent's own site as buyers talking", async () => {
+    const report = await verify((body) => {
+      body.incumbents = [{ name: "Forum Co", url: "https://forum-site.test/pricing", whatTheyMiss: "sells software to chains only", priceCents: 4_900 }];
+    });
+    expect(report.structural).toContain("3 practitioner quote(s) are on an incumbent's own site, which is its marketing, not buyers talking");
+    expect(report.pass).toBe(false);
+  });
+});

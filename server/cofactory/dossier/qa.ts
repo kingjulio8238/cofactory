@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { BUYER_VOICE_SOURCES } from "../../../shared/cofactory/discovery.ts";
-import type { DossierBody, DossierPolicy, QaReport, VerificationReport } from "../../../shared/cofactory/dossier.ts";
+import { hoursPerMonthOf, type DossierBody, type DossierPolicy, type QaReport, type VerificationReport } from "../../../shared/cofactory/dossier.ts";
 import { siteOf } from "../discovery/discovery.ts";
 import { monthlyCents } from "./score.ts";
 
@@ -26,7 +26,7 @@ const BANK: Ask[] = [
   { id: "human", question: "What does the human alternative cost?", answer: (body, ok) => (ok("human_alternative") ? `${dollars(body.offer.humanAlternative.amountCents)} per ${body.offer.humanAlternative.per}` : null) },
   { id: "ratio", question: "Is our price at most a third of the human alternative?", answer: (body, ok) => {
     if (!ok("human_alternative")) return null;
-    const ours = monthlyCents(body.offer.priceCents, body.offer.per), theirs = monthlyCents(body.offer.humanAlternative.amountCents, body.offer.humanAlternative.per, body.offer.humanAlternative.hoursPerMonth);
+    const ours = monthlyCents(body.offer.priceCents, body.offer.per), theirs = monthlyCents(body.offer.humanAlternative.amountCents, body.offer.humanAlternative.per, hoursPerMonthOf(body.offer.humanAlternative.hours));
     return ours === null || theirs === null ? null : `${ours <= theirs / 3 ? "yes" : "no"}: ${dollars(ours)} against ${dollars(theirs)} a month`;
   } },
   { id: "incumbent", question: "Who is the closest incumbent, and what exactly do they miss?", answer: (body, ok) => {

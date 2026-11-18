@@ -17,6 +17,7 @@ export function dossierClaims(body: DossierBody): ClaimInput[] {
     { role: "buyer_count", index: 0, url: body.buyerCount.url, quote: body.buyerCount.quote },
     ...body.incumbents.map((incumbent, index): ClaimInput => ({ role: "incumbent", index, url: incumbent.url, quote: null })),
     { role: "human_alternative", index: 0, url: body.offer.humanAlternative.url, quote: body.offer.humanAlternative.quote },
+    ...(body.offer.humanAlternative.hours ? [{ role: "hours" as const, index: 0, url: body.offer.humanAlternative.hours.url, quote: body.offer.humanAlternative.hours.quote }] : []),
   ];
 }
 
@@ -27,6 +28,18 @@ export function amountsIn(quote: string): number[] {
     const scale = match[2] ? (/^(k|thousand)$/i.test(match[2]) ? 1_000 : 1_000_000) : 1;
     return Math.round(base * scale * 100);
   });
+}
+
+/**
+ * What is wrong with an hourly price's hours, or nothing: an hourly price needs the hours of work quoted from a page, the
+ * page must check out (`verified`), and the number given must be the one its quote states.
+ */
+export function hoursProblems(price: { per: string; hours?: { quote: string; amount: number } }, verified: boolean, what: string): string[] {
+  if (price.per !== "hour") return [];
+  if (!price.hours) return [`${what} is an hourly rate with no quoted hours of work, so it cannot be put on a monthly basis`];
+  if (!verified) return [`the hours behind ${what}'s hourly rate do not check out on their page`];
+  if (!countsIn(price.hours.quote).includes(price.hours.amount)) return [`the hours behind ${what} (${price.hours.amount}) are not the number their quote states`];
+  return [];
 }
 
 export function countsIn(quote: string): number[] {
@@ -80,6 +93,7 @@ export async function verifyDossier(truth: Truth, body: DossierBody, policy: Dos
   else if (!countsIn(body.buyerCount.quote).includes(body.buyerCount.value)) critical.push(`the buyer count ${body.buyerCount.value} is not the number its quote states`);
   if (!ok("human_alternative")) critical.push("the human alternative's price does not check out");
   else if (!amountsIn(body.offer.humanAlternative.quote).includes(body.offer.humanAlternative.amountCents)) critical.push("the human alternative's price is not the amount its quote states");
+  critical.push(...hoursProblems(body.offer.humanAlternative, ok("hours"), "the human alternative"));
   body.spend.forEach((line, index) => {
     if (ok("spend", index) && !amountsIn(line.quote).includes(line.amountCents)) critical.push(`spend line ${index + 1} states an amount its quote does not`);
   });
@@ -87,11 +101,16 @@ export async function verifyDossier(truth: Truth, body: DossierBody, policy: Dos
   const structural: string[] = [];
   const realBuyers = body.buyers.filter((_, index) => ok("buyer", index) && ok("contact", index));
   if (realBuyers.length < policy.minBuyers) structural.push(`${realBuyers.length} named buyers with a working page and contact route; needs ${policy.minBuyers}`);
-  const practitionerPages = new Set(body.pains.filter((pain, index) => ok("pain", index) && BUYER_VOICE_SOURCES.includes(pain.sourceType)).map((pain) => pain.url));
+  // a quote on an incumbent's own site is its marketing, whatever source type it was filed under
+  const vendorSites = new Set(body.incumbents.map((incumbent) => siteOf(incumbent.url)));
+  const ownVoice = (pain: DossierBody["pains"][number], index: number) => ok("pain", index) && BUYER_VOICE_SOURCES.includes(pain.sourceType) && !vendorSites.has(siteOf(pain.url));
+  const onVendorSites = body.pains.filter((pain, index) => ok("pain", index) && BUYER_VOICE_SOURCES.includes(pain.sourceType) && vendorSites.has(siteOf(pain.url))).length;
+  if (onVendorSites) structural.push(`${onVendorSites} practitioner quote(s) are on an incumbent's own site, which is its marketing, not buyers talking`);
+  const practitionerPages = new Set(body.pains.filter(ownVoice).map((pain) => pain.url));
   const practitionerSites = new Set([...practitionerPages].map(siteOf));
   if (practitionerPages.size < policy.minPractitioners) structural.push(`${practitionerPages.size} practitioner pages; needs ${policy.minPractitioners}`);
   if (practitionerSites.size < 2) structural.push("practitioner quotes all come from one site");
-  const voices = body.pains.filter((pain, index) => ok("pain", index) && BUYER_VOICE_SOURCES.includes(pain.sourceType));
+  const voices = body.pains.filter(ownVoice);
   const voiceKinds = new Set(voices.map((pain) => pain.sourceType));
   if (voiceKinds.size < 2) structural.push(`practitioner quotes come from one kind of source (${[...voiceKinds].join(", ") || "none"}); pain needs buyers talking (forums, reviews, Q&A), not only one kind of page`);
   const jobPages = new Set(voices.filter((pain) => pain.sourceType === "job_board").map((pain) => pain.url)).size;

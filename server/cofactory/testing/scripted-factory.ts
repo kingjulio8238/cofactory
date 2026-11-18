@@ -81,7 +81,7 @@ export function scriptFirstSearch(factory: ScriptedFactory): void {
 /** A card the scripted scout submits for a niche; every claim on it is a fixture page. */
 export const scriptedCard = (nicheId: string, name: string) => tool("cofactory_submit_card", {
   niche_id: nicheId, name, headline: `${name}: the monthly report one-store pharmacies need, done for them`,
-  price_today: { url: "https://jobs-site.test/jobs", quote: "Budget: $600 per month, fixed price, long term.", amount_cents: 60_000, per: "month" },
+  price_today: { url: "https://jobs-site.test/jobs", quote: "Budget: $600 per month, fixed price, long term.", amount_cents: 60_000, per: "month", kind: "job_post_budget" },
   offer: { price_cents: 15_000, per: "month" },
   rival: { name: "RemitCheck Enterprise", url: "https://vendor-site.test/pricing", what_they_miss: "sells software to chains of 25+ stores; one-store owners still do the work", price_cents: 4_900 },
   example_buyer: { name: "Riverside Pharmacy 1", url: "https://buyers-site.test/buyer-1" },
