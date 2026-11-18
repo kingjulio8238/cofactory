@@ -153,7 +153,7 @@ export function createLauncher(deps: LauncherDeps) {
     },
 
     /** Why a dossier cannot launch a company, checked before the owner is asked and again at launch; null when it can. */
-    dossierProblem(dossierId: string): string | null {
+    dossierProblem(dossierId: string, fromCard = false): string | null {
       const store = deps.discovery?.store;
       const dossier = store?.dossier(dossierId);
       if (!store || !dossier) return "no such dossier";
@@ -163,13 +163,16 @@ export function createLauncher(deps: LauncherDeps) {
         const company = deps.book.companies().find((candidate) => store.linkOf(candidate.id)?.nicheId === niche.id);
         return `this niche is already a company${company ? ` (${company.name}, ${company.status})` : ""}`;
       }
+      const card = store.cardsOf(niche.id).at(-1);
+      if (card?.status === "passed") return "the owner passed on this niche's card";
+      if (card?.status === "started" && !fromCard) return "the owner started this niche from its card; it launches by itself once its dossier is shortlisted";
       return null;
     },
-    async launch(input: { name: string; brief: string; capCents: number; dossierId?: string }, actor: string, playbook: Playbook = NICHE_PLAYBOOK): Promise<Result<{ company: Company; team: Array<{ role: CompanyRole; botId: string }> }>> {
+    async launch(input: { name: string; brief: string; capCents: number; dossierId?: string; fromCard?: boolean }, actor: string, playbook: Playbook = NICHE_PLAYBOOK): Promise<Result<{ company: Company; team: Array<{ role: CompanyRole; botId: string }> }>> {
       let brief = input.brief;
       let link: { nicheId: string; dossierId: string } | null = null;
       if (input.dossierId) {
-        const problem = this.dossierProblem(input.dossierId);
+        const problem = this.dossierProblem(input.dossierId, input.fromCard === true);
         if (problem) return { ok: false, reason: problem };
         const store = deps.discovery!.store;
         const dossier = store.dossier(input.dossierId)!;

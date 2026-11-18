@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "../testing/cleanup.ts";
 import { freePortBlock } from "../testing/ports.ts";
-import { askToLaunch, ending, scriptFirstSearch, searchToShortlist, startScriptedFactory, tool, type ScriptedFactory } from "./testing/scripted-factory.ts";
+import { ending, scriptFirstSearch, searchToCards, startFromCard, startScriptedFactory, tool, type ScriptedFactory } from "./testing/scripted-factory.ts";
 
 let factory: ScriptedFactory | null = null;
 let dataDir = "";
@@ -16,7 +16,7 @@ afterAll(async () => {
 });
 
 describe("a factory's whole life on a real dusk server, every seat scripted", () => {
-  it("opens, searches, writes a dossier, launches on the owner's OK, goes live, sells, delivers, rehearses and reaches the first dollar", { timeout: 420_000 }, async () => {
+  it("opens, searches, shows the owner cards, launches the one they start, goes live, sells, delivers, rehearses and reaches the first dollar", { timeout: 420_000 }, async () => {
     dataDir = mkdtempSync(join(tmpdir(), "cofactory-lifecycle-e2e-"));
     factory = await startScriptedFactory(dataDir, await freePortBlock([0, 1]));
     const { url, hooks, outbox, call, until, routes } = factory;
@@ -30,26 +30,29 @@ describe("a factory's whole life on a real dusk server, every seat scripted", ()
     expect(opened.territories).toHaveLength(6);
     const scout = opened.staffed.find((seat: { role: string }) => seat.role === "scout").botId as string;
 
-    // the scout's niches earn a dossier, which is shortlisted
-    const { dossierId } = await searchToShortlist(factory);
+    // the scout's search ends in three cards; the owner sees them before any company starts
+    const { niches, cards } = await searchToCards(factory);
     const reopened = await call("POST", "/api/cofactory/factory/open", {});
     expect(reopened.territories, "opening again, as a reloaded onboarding does, keeps the territories").toEqual(opened.territories);
     expect((await call("GET", "/api/cofactory/discovery")).batches, "and starts no second first search").toHaveLength(1);
-
-    // the lead asks to launch from it; nothing launches until the owner approves in Needs you
-    const approval = await askToLaunch(factory, dossierId);
-    const needsYou = (await call("GET", `/api/cofactory/seat/${scout}`)).needsYou;
-    expect(needsYou.approvals.map((item: { title: string }) => item.title)).toEqual(["Start Riverside Recon?"]);
-    expect(needsYou.alarms, "the lead's own alarms never ask the owner").toEqual([]);
+    const pick = await call("GET", "/api/cofactory/cards");
+    expect(pick).toMatchObject({ startCents: 5_000, startProblem: null });
+    expect(pick.cards[0].quotes.map((quote: { site: string }) => quote.site), "the buyers' own words, one site each").toEqual(["forum-site.test", "jobs-site.test", "board-site.test"]);
+    expect((await call("GET", "/api/cofactory/rail")).factory.needs, "three cards wait for the owner").toBe(3);
+    expect((await call("GET", `/api/cofactory/seat/${scout}`)).needsYou.alarms, "the lead's own alarms never ask the owner").toEqual([]);
     expect((await call("GET", "/api/cofactory/state")).companies).toHaveLength(0);
-    const approved = await call("POST", `/api/cofactory/approvals/${approval.id}`, { decision: "approve" });
-    expect(approved.outcome).toContain("Riverside Recon is launched");
-    const company = (await call("GET", "/api/cofactory/state")).companies[0] as { id: string; brief: string };
+
+    // the owner passes on one and starts another; it launches once its full dossier holds up, with no further ask
+    expect(await call("POST", `/api/cofactory/cards/${cards["Appeal Desk"]!.id}`, { decision: "pass", reason: "too close to legal work" })).toMatchObject({ ok: true });
+    const company = await startFromCard(factory, cards["Riverside Recon"]!.id);
+    expect(company.name).toBe("Riverside Recon");
+    expect((await call("GET", "/api/cofactory/discovery")).niches.find((niche: { id: string }) => niche.id === niches[1]).status).toBe("passed");
+    const dossierId = ((await call("GET", "/api/cofactory/dossiers")).niches as Array<{ niche: { id: string }; dossier: { id: string } }>).find((entry) => entry.niche.id === niches[0])!.dossier.id;
     routes({ "Factory lead ·": [tool("cofactory_launch_company", { name: "Riverside Recon", cap_cents: 5_000, dossier_id: dossierId }), ...ending("asked again")] });
-    await until("the second ask refused", async () => ((await call("GET", "/api/cofactory/decisions")).decisions as Array<{ kind: string; reason: string }>)
+    await until("the lead's launch refused", async () => ((await call("GET", "/api/cofactory/decisions")).decisions as Array<{ kind: string; reason: string }>)
       .some((d) => d.kind === "company.launch" && d.reason.includes("this niche is already a company (Riverside Recon, live)")));
     routes({});
-    expect((await call("GET", "/api/cofactory/approvals")).approvals, "a launched dossier never asks the owner twice").toEqual([]);
+    expect((await call("GET", "/api/cofactory/approvals")).approvals, "the owner's Start was the only ask").toEqual([]);
     expect(company.brief, "the dossier carried into the brief").toContain("Buyer: independent pharmacies in Ohio.");
     const ceoSeat = (await call("GET", "/api/cofactory/rail")).companies[0].ceoBotId as string;
     const asked = await until("the rails the owner still owes", async () => (await call("GET", `/api/cofactory/seat/${ceoSeat}`)).needsYou.alarms[0]?.detail as string | undefined);

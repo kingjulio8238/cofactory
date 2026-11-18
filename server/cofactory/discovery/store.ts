@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 
-import type { DiscoveryBatch, FactoryProfile, Niche, NicheStatus, Signal } from "../../../shared/cofactory/discovery.ts";
+import type { Card, DiscoveryBatch, FactoryProfile, Niche, NicheStatus, Signal } from "../../../shared/cofactory/discovery.ts";
 import type { Dossier, DossierStatus } from "../../../shared/cofactory/dossier.ts";
 
 export const POSTMORTEM_CAUSES = ["no_buyer_voice", "no_reply", "price", "reach", "fulfilment", "legal", "competition", "economics", "other"] as const;
@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS niches (
 CREATE TABLE IF NOT EXISTS dossiers (
   id TEXT PRIMARY KEY, niche_id TEXT NOT NULL, factory_id TEXT NOT NULL, version INTEGER NOT NULL, at INTEGER NOT NULL, body TEXT NOT NULL,
   verification TEXT NOT NULL, qa TEXT NOT NULL, score TEXT, status TEXT NOT NULL, champion TEXT, UNIQUE (niche_id, version)
+);
+CREATE TABLE IF NOT EXISTS cards (
+  id TEXT PRIMARY KEY, niche_id TEXT NOT NULL, factory_id TEXT NOT NULL, version INTEGER NOT NULL, at INTEGER NOT NULL, body TEXT NOT NULL,
+  checks TEXT NOT NULL, problems TEXT NOT NULL, status TEXT NOT NULL, decided_at INTEGER, pass_reason TEXT, company_id TEXT, note TEXT,
+  UNIQUE (niche_id, version)
 );
 CREATE TABLE IF NOT EXISTS company_links (company_id TEXT PRIMARY KEY, niche_id TEXT NOT NULL, dossier_id TEXT);
 CREATE TABLE IF NOT EXISTS postmortems (
@@ -152,6 +157,29 @@ export function openDiscoveryStore(file: string) {
       return (db.prepare("SELECT * FROM dossiers WHERE niche_id = ? ORDER BY version").all(nicheId) as Array<Record<string, unknown>>).map(toDossier);
     },
 
+    addCard(card: Card): void {
+      db.prepare("INSERT INTO cards (id, niche_id, factory_id, version, at, body, checks, problems, status, decided_at, pass_reason, company_id, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(card.id, card.nicheId, card.factoryId, card.version, card.at, JSON.stringify(card.body), JSON.stringify(card.checks), JSON.stringify(card.problems), card.status,
+          card.decidedAt, card.passReason, card.companyId, card.note);
+    },
+    updateCard(id: string, patch: Partial<Pick<Card, "status" | "decidedAt" | "passReason" | "companyId" | "note">>): void {
+      const card = this.card(id);
+      if (!card) return;
+      const next = { ...card, ...patch };
+      db.prepare("UPDATE cards SET status = ?, decided_at = ?, pass_reason = ?, company_id = ?, note = ? WHERE id = ?").run(next.status, next.decidedAt, next.passReason, next.companyId, next.note, id);
+    },
+    card(id: string): Card | null {
+      const row = db.prepare("SELECT * FROM cards WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+      return row ? toCard(row) : null;
+    },
+    cardsOf(nicheId: string): Card[] {
+      return (db.prepare("SELECT * FROM cards WHERE niche_id = ? ORDER BY version").all(nicheId) as Array<Record<string, unknown>>).map(toCard);
+    },
+    /** The newest version of each niche's card, oldest niche first. */
+    latestCards(): Card[] {
+      return (db.prepare("SELECT c.* FROM cards c JOIN (SELECT niche_id, MAX(version) AS v FROM cards GROUP BY niche_id) m ON c.niche_id = m.niche_id AND c.version = m.v ORDER BY c.at").all() as Array<Record<string, unknown>>).map(toCard);
+    },
+
     linkCompany(companyId: string, nicheId: string, dossierId: string | null): void {
       db.prepare("INSERT INTO company_links (company_id, niche_id, dossier_id) VALUES (?, ?, ?) ON CONFLICT(company_id) DO UPDATE SET niche_id = excluded.niche_id, dossier_id = excluded.dossier_id").run(companyId, nicheId, dossierId);
     },
@@ -174,6 +202,15 @@ export function openDiscoveryStore(file: string) {
     close(): void {
       db.close();
     },
+  };
+}
+
+function toCard(row: Record<string, unknown>): Card {
+  const optional = (value: unknown) => (value === null || value === undefined ? null : String(value));
+  return {
+    id: String(row.id), nicheId: String(row.niche_id), factoryId: String(row.factory_id), version: Number(row.version), at: Number(row.at),
+    body: JSON.parse(String(row.body)), checks: JSON.parse(String(row.checks)), problems: JSON.parse(String(row.problems)), status: row.status as Card["status"],
+    decidedAt: row.decided_at === null ? null : Number(row.decided_at), passReason: optional(row.pass_reason), companyId: optional(row.company_id), note: optional(row.note),
   };
 }
 

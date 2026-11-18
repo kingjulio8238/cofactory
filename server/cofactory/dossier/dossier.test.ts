@@ -65,21 +65,21 @@ async function rig() {
   const strong = propose("monthly DIR fee reconciliation report", [signals[0]!, signals[1]!, signals[2]!, signals[3]!]);
   const middle = propose("PBM audit appeal letters", [signals[0]!, signals[1]!, signals[2]!]);
   const weak = propose("board records binder upkeep", [signals[1]!, signals[2]!, signals[3]!]);
-  return { book, truth, store, runtime, observeStore, dossiers, sessions, scheduler, starts, call, strong, middle, weak };
+  // dossiers start from a closed batch's niches picked by hand (cards cover the owner's own path to a dossier)
+  const closeAndSelect = async () => { await call("cofactory_close_batch", {}); return dossiers.select(store.batches()[0]!.id); };
+  return { book, truth, store, runtime, observeStore, dossiers, sessions, scheduler, starts, call, closeAndSelect, strong, middle, weak };
 }
 
 describe("cofactory dossiers", () => {
-  it("selects the strongest candidates when the batch closes", async () => {
+  it("selects the strongest candidates of a closed batch", async () => {
     const r = await rig();
-    const closed = await r.call("cofactory_close_batch", {});
-    expect((closed.structuredContent as { selectedForDossiers: string[] }).selectedForDossiers.sort()).toEqual([r.strong, r.middle].sort());
+    expect((await r.closeAndSelect()).sort()).toEqual([r.strong, r.middle].sort());
     expect(r.store.niche(r.weak)!.status).toBe("candidate");
-    expect(r.observeStore.decisions().filter((decision) => decision.kind === "niche.select")).toHaveLength(2);
   });
 
   it("scores a submitted dossier, shortlists it, and files the decision with every claim check behind it", async () => {
     const r = await rig();
-    await r.call("cofactory_close_batch", {});
+    await r.closeAndSelect();
     const thin = goodDossier();
     thin.buyerCount.value = 9_999;
     const failed = await r.call("cofactory_submit_dossier", { niche_id: r.strong, dossier: thin });
@@ -96,7 +96,7 @@ describe("cofactory dossiers", () => {
 
   it("wakes the scout for each selected niche with its evidence, and rejects a niche that fails its allowance", async () => {
     const r = await rig();
-    await r.call("cofactory_close_batch", {});
+    await r.closeAndSelect();
     await r.scheduler.tick();
     expect(r.starts).toHaveLength(1);
     expect(r.starts[0]!.prompt).toMatch(/Research the dossier for "independent pharmacies in Ohio · (monthly DIR fee reconciliation report|PBM audit appeal letters)"/);
@@ -117,7 +117,7 @@ describe("cofactory dossiers", () => {
 describe("from dossier to company", () => {
   it("launches a company from a shortlisted dossier, claims the niche, and refuses an unshortlisted one", async () => {
     const r = await rig();
-    await r.call("cofactory_close_batch", {});
+    await r.closeAndSelect();
     const passed = await r.call("cofactory_submit_dossier", { niche_id: r.strong, dossier: goodDossier() });
     const dossierId = (passed.structuredContent as { status: string }) && r.store.dossiersOf(r.strong).at(-1)!.id;
     const { createLauncher } = await import("../runtime/launcher.ts");

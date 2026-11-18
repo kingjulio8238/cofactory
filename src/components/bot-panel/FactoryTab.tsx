@@ -74,8 +74,8 @@ function ago(at: number): string {
 
 const CHECKLIST: Record<Checklist, { title: string; hint: string }> = {
   search: { title: "Search your industries", hint: "Your scout looks for people already paying to get a job done" },
-  shortlist: { title: "Shortlist a niche", hint: "Every claim checked against its source" },
-  launch: { title: "Start a company", hint: "Your lead brings you the case first" },
+  shortlist: { title: "Cards to pick from", hint: "Every claim checked against its source" },
+  launch: { title: "Start a company", hint: "You start it from its card" },
   live: { title: "Go live", hint: "Its page and first emails, after your OK" },
   dollar: { title: "First paying customer", hint: "Or the company is closed and what it learned is kept" },
 };

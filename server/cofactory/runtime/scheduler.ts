@@ -2,6 +2,7 @@ import type { Company, FactoryMessage, Membership, Role } from "../../../shared/
 import type { Book } from "../book.ts";
 import type { Truth } from "../truth/store.ts";
 import type { Discovery } from "../discovery/discovery.ts";
+import type { Cards } from "../dossier/cards.ts";
 import type { Dossiers } from "../dossier/dossiers.ts";
 import type { Sessions } from "./sessions.ts";
 import type { RuntimeStore } from "./store.ts";
@@ -30,7 +31,7 @@ const NEXT_GOAL: Record<Company["stage"], { objective: string; doneWhen: string 
 };
 
 const FACTORY_GOAL = {
-  objective: "Run the portfolio: read every company's state and the auditor's recommendations, act on kills and top-ups, and start the next company when the money and a strong niche allow.",
+  objective: "Run the portfolio: read every company's state and the auditor's recommendations, and act on kills and top-ups. New companies start when the owner picks them from their cards, so never launch one yourself.",
   doneWhen: "every recommendation is acted on or answered and the next portfolio step is set",
 };
 
@@ -46,6 +47,7 @@ export interface SchedulerDeps {
   sessions: Sessions;
   discovery?: Discovery;
   dossiers?: Dossiers;
+  cards?: Cards;
   now?: () => number;
 }
 
@@ -131,10 +133,43 @@ export function createScheduler(deps: SchedulerDeps) {
         profile.constraints.length ? `Owner constraints: ${profile.constraints.join("; ")}` : "",
         profile.seedNiches.length ? `Seed niches to look into first: ${profile.seedNiches.join("; ")}` : "",
         status.batch.note ? `Batch note: ${status.batch.note}` : "",
+        ...(deps.cards?.passed().length ? [`The owner passed on these; find different ones:\n${deps.cards.passed().map((item) => `- ${item.buyer} · ${item.job}${item.reason ? ` (why: ${item.reason})` : ""}`).join("\n")}`] : []),
         `So far: ${status.niches} niches from ${status.signals} signals on ${status.sites} sites.`,
       ].filter(Boolean).join("\n"),
     });
     return !("refused" in result) && result.started;
+  }
+
+  /** Wakes the scout to write the card of a niche picked for one: quick, so the owner has something to decide on soon. */
+  async function wakeForCard(): Promise<boolean> {
+    const discovery = deps.discovery, cards = deps.cards;
+    const scout = seatFor(null, "scout");
+    if (!discovery || !cards || !scout || store.liveFor(scout.botId)) return false;
+    for (const nicheId of cards.wanted()) {
+      const niche = discovery.store.niche(nicheId)!;
+      const trigger = `card:${nicheId}`;
+      const past = store.sessionsFor(null, 500).filter((session) => session.botId === scout.botId && session.trigger === trigger && ranARound(session.id));
+      if (past.length >= sessions.policy.cardSessionsPerNiche) {
+        discovery.store.setNicheStatus(nicheId, "rejected");
+        store.note(past[0]!.id, "niche_rejected", { nicheId, why: `no card held up after ${past.length} sessions` });
+        continue;
+      }
+      const previous = cards.latest(nicheId);
+      const signals = niche.signalIds.map((id) => discovery.store.signal(id)).filter((signal) => signal !== null);
+      const result = await sessions.request({
+        companyId: null, botId: scout.botId, kind: "operating", trigger,
+        objective: `Write the card for "${niche.buyer} · ${niche.job}" and submit it with cofactory_submit_card (niche_id ${nicheId}). The owner is waiting to decide on it, so be quick: a card needs one price a buyer pays today, one rival, one real buyer, and our offer.`,
+        doneWhen: "the card is submitted and ready, or the research shows the niche does not hold (say so in the journal)",
+        context: [
+          `Niche: buyer ${niche.buyer}; job ${niche.job}; channel ${niche.channel}.`,
+          `Gap as proposed: ${niche.whyGap}`,
+          `Its signals (the card shows these as the buyers' own words):\n${signals.map((signal) => `- [${signal.sourceType}] ${signal.url}: "${signal.quote}"`).join("\n")}`,
+          previous ? `The last card did not hold up: ${previous.problems.join("; ")}` : "",
+        ].filter(Boolean).join("\n"),
+      });
+      return !("refused" in result) && result.started;
+    }
+    return false;
   }
 
   /** Wakes the scout to research a selected niche's dossier, one niche at a time, within the niche's session allowance. */
@@ -161,6 +196,12 @@ export function createScheduler(deps: SchedulerDeps) {
           `Niche: buyer ${niche.buyer}; job ${niche.job}; channel ${niche.channel}.`,
           `Gap as proposed: ${niche.whyGap}`,
           `Its signals:\n${signals.map((signal) => `- [${signal.sourceType}] ${signal.url}: "${signal.quote}"`).join("\n")}`,
+          ...(() => {
+            const card = deps.cards?.latest(nicheId);
+            if (card?.status !== "started") return [];
+            const { body } = card;
+            return [`The owner chose this from its card, so build on it: ${body.name}, "${body.headline}"; buyers pay ${body.priceToday.amountCents} cents per ${body.priceToday.per} today (${body.priceToday.url}); rival ${body.rival.name} (${body.rival.url}) misses ${body.rival.whatTheyMiss}; example buyer ${body.exampleBuyer.name} (${body.exampleBuyer.url}); our offer ${body.offer.priceCents} cents per ${body.offer.per}.`];
+          })(),
           previous ? `Previous dossier v${previous.version} was ${previous.status}: ${[...previous.verification.criticalFailures, ...previous.verification.structural, ...previous.verification.claims.filter((claim) => claim.verdict !== "verified").map((claim) => `${claim.role} ${claim.url} ${claim.verdict}`), ...(previous.score?.vetoes.map((item) => `veto ${item.veto}: ${item.why}`) ?? []), `${previous.qa.unknown} questions unknown`].join("; ")}` : "",
         ].filter(Boolean).join("\n"),
       });
@@ -183,6 +224,7 @@ export function createScheduler(deps: SchedulerDeps) {
         if (!("refused" in result) && result.started) started++;
       }
       if (await wakeForDiscovery()) started++;
+      else if (await wakeForCard()) started++;
       else if (await wakeForDossier()) started++;
       const lead = seatFor(null, "lead");
       if (lead && cadenceDue(lead)) {

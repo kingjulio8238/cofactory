@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { X } from "../../icons";
+import { openFactoryHome } from "@/lib/factory-home";
 import { cn } from "@/lib/cn";
 import { friendlyError } from "@/lib/plain-error";
 import { api } from "@/state/store";
@@ -283,7 +284,7 @@ export function ApprovalsStep({ approvals, emails, onNext }: { approvals: Approv
       <div className="flex w-full max-w-[440px] flex-col gap-5">
         <ul className="flex flex-col gap-1.5">
           <ApprovalRow title="Contact real people" why="Nothing reaches a customer until you've seen the page and the first emails." checked locked />
-          <ApprovalRow title="Start a company" why="Your lead brings you the case and the cap first." checked={launch} onToggle={() => setLaunch(!launch)} />
+          <ApprovalRow title="Start a company" why="You pick each one from its card. Off, the factory starts the ones that hold up." checked={launch} onToggle={() => setLaunch(!launch)} />
           <ApprovalRow title={`Spend more than ${dollars(spend)}`} why="Smaller spends inside a company's cap go ahead." checked={spend > 0} onToggle={() => setSpend(spend > 0 ? 0 : 2_500)} />
           <ApprovalRow title="Close a company" why={kill ? "Your lead asks before closing one." : "Your lead closes it and tells you why, with what it learned."} checked={kill} onToggle={() => setKill(!kill)} />
         </ul>
@@ -339,10 +340,10 @@ export function OpeningStep({ onDone }: { onDone: (botId: string | null) => void
         </div>
       }
       title={state.kind === "failed" ? "Your factory didn't open" : done ? "Your factory is open" : "Opening your factory"}
-      sub={state.kind === "failed" ? state.why : done ? "Your scout picked where to start and is already looking. You'll see what it finds as it finds it." : `${Math.min(here, 2)} of 2 here`}
+      sub={state.kind === "failed" ? state.why : done ? "Your scout picked where to start and is already looking. The companies it finds come to you as cards to start or pass on." : `${Math.min(here, 2)} of 2 here`}
       footer={state.kind === "failed"
         ? <button type="button" data-primary="" onClick={() => void open()} className={PRIMARY}>Try again</button>
-        : <button type="button" data-primary="" data-opening-done="" disabled={!done} onClick={() => onDone(state.kind === "open" ? state.scoutId ?? state.leadId : null)} className={done ? PRIMARY : SECONDARY}>Meet your scout</button>}>
+        : <button type="button" data-primary="" data-opening-done="" disabled={!done} onClick={() => { openFactoryHome(); onDone(null); }} className={done ? PRIMARY : SECONDARY}>See your first companies</button>}>
       {done && state.kind === "open" && state.territories.length > 0 && (
         <ul data-opening-territories="" className="flex w-full max-w-[440px] flex-col gap-1.5">
           {state.territories.slice(0, 3).map((territory) => (

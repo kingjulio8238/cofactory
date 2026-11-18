@@ -26,6 +26,7 @@ import type { Launcher } from "./runtime/launcher.ts";
 import type { Sessions } from "./runtime/sessions.ts";
 import type { Observer } from "./observe/observer.ts";
 import type { Discovery } from "./discovery/discovery.ts";
+import type { Cards } from "./dossier/cards.ts";
 import type { Dossiers } from "./dossier/dossiers.ts";
 import { giveawayProblem, type Outreach } from "./validation/outreach.ts";
 import type { Rails } from "./validation/rails.ts";
@@ -88,6 +89,7 @@ export interface ToolContext {
   observe?: Observer;
   discovery?: Discovery;
   dossiers?: Dossiers;
+  cards?: Cards;
   validation?: { sprints: Sprints; outreach: Outreach; rails: Rails; orders: Orders; folderOf(companyId: string): string; saveOffer(companyId: string, html: string): string };
   /** The owner's standing choices: the per-company cap a launch may not exceed, and what waits for their OK. */
   settings?: () => FactorySettings;
@@ -332,17 +334,52 @@ const TOOLS: ToolSpec<z.ZodType>[] = [
   }),
   spec({
     name: "cofactory_close_batch",
-    description: "Close the open discovery batch once it has its target number of niches and meets the boring and cross-field quotas. Closing selects the strongest candidates for dossiers.",
+    description: "Close the open discovery batch once it has its target number of niches and meets the boring and cross-field quotas. Closing picks the strongest niches for cards the owner chooses from.",
     roles: ["scout", "lead"],
     input: z.object({}),
     run(_args, ctx) {
-      const { discovery, dossiers } = ctx;
+      const { discovery, cards } = ctx;
       if (!discovery) return refused("discovery is not running");
       const closed = discovery.closeBatch();
       if (!closed.ok) return refused(closed.reason);
-      const selected = dossiers?.select(closed.status.batch.id) ?? [];
-      for (const id of selected) decide(ctx, "niche.select", "allowed", "selected for a dossier from the closed batch", [{ type: "niche", id }], null);
-      return ok({ status: closed.status, selectedForDossiers: selected });
+      const picked = cards?.select(closed.status.batch.id) ?? [];
+      for (const id of picked) decide(ctx, "niche.card", "allowed", "picked for a card from the closed batch", [{ type: "niche", id }], null);
+      return ok({ status: closed.status, pickedForCards: picked });
+    },
+  }),
+  spec({
+    name: "cofactory_submit_card",
+    description: [
+      "Submit the card for a niche picked for one: the short case the owner reads before saying Start. Every URL is fetched.",
+      "Needs: the company's name and a one-line headline; one price a buyer pays today for this job (amount_cents must be the amount in the quote);",
+      "one rival and what it misses; one real buyer who fits, with a page proving they exist; our offer, at most a third of today's price per month;",
+      "and the risks (a licence or regulated claims rule it out; a regulated topic in your own words needs a note saying why none is involved).",
+      "The niche's recorded signals are shown as the buyers' own words. A failed card can be fixed and resubmitted.",
+    ].join(" "),
+    roles: ["scout"],
+    input: z.object({
+      niche_id: z.string().min(1), name: z.string().min(2).max(80), headline: z.string().min(10).max(200),
+      price_today: cited.extend({ amount_cents: z.number().int().positive(), per, hours_per_month: z.number().positive().max(744).optional() }),
+      offer: z.object({ price_cents: z.number().int().positive(), per: z.enum(["month", "year", "job"]) }),
+      rival: z.object({ name: z.string().min(1).max(120), url: z.string().url().max(2_000), what_they_miss: z.string().min(10).max(500), price_cents: z.number().int().positive().nullable().default(null) }),
+      example_buyer: z.object({ name: z.string().min(1).max(200), url: z.string().url().max(2_000) }),
+      risks: z.object({ licensed_advice: z.boolean(), regulated_claims: z.boolean(), notes: z.string().max(2_000).default("") }),
+    }),
+    async run(args, ctx) {
+      if (!ctx.cards) return refused("cards are not running");
+      const result = await ctx.cards.submit(args.niche_id, {
+        name: args.name.trim(), headline: args.headline.trim(),
+        priceToday: { url: args.price_today.url, quote: args.price_today.quote, amountCents: args.price_today.amount_cents, per: args.price_today.per, ...(args.price_today.hours_per_month ? { hoursPerMonth: args.price_today.hours_per_month } : {}) },
+        offer: { priceCents: args.offer.price_cents, per: args.offer.per },
+        rival: { name: args.rival.name, url: args.rival.url, whatTheyMiss: args.rival.what_they_miss, priceCents: args.rival.price_cents },
+        exampleBuyer: args.example_buyer,
+        risks: { licensedAdvice: args.risks.licensed_advice, regulatedClaims: args.risks.regulated_claims, notes: args.risks.notes },
+      });
+      if (!result.ok) { decide(ctx, "card.submit", "refused", result.reason, [{ type: "niche", id: args.niche_id }], null); return refused(result.reason); }
+      const { card } = result;
+      const links = card.checks.filter((item) => item.checkId !== null).map((item) => ({ type: "claim_check" as const, id: item.checkId!, url: item.url }));
+      decide(ctx, "card.submit", card.status === "ready" ? "allowed" : "refused", `v${card.version} ${card.status}${card.problems.length ? `: ${card.problems.join("; ")}` : ""}`, [{ type: "card", id: card.id }, ...links], null);
+      return ok({ status: card.status, version: card.version, problems: card.problems, note: card.status === "ready" ? "The owner sees it now and decides." : "Fix what failed and submit it again." });
     },
   }),
   spec({

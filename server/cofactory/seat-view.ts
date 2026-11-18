@@ -69,7 +69,7 @@ export function seatView(deps: {
     }));
     const finds = discovery.store.signals().sort((a, b) => b.at - a.at).slice(0, 6).map((signal) => ({ quote: signal.quote, site: signal.site, url: signal.url, at: signal.at }));
     const batch = discovery.batchStatus();
-    const shortlisted = niches.some((niche) => discovery.store.dossiersOf(niche.id).some((dossier) => dossier.status === "shortlisted" || dossier.status === "championed"));
+    const carded = discovery.store.latestCards().some((card) => card.status !== "failed");
     const companies = book.companies();
     const live = companies.some((company) => rails.peek(company.id)?.outreachArmed === true);
     const firstDollar = companies.some((company) => orders.firstDollar(company.id).paid);
@@ -81,7 +81,7 @@ export function seatView(deps: {
         batch: batch ? { niches: batch.niches, target: batch.batch.target, closed: batch.batch.closedAt !== null } : null,
         checklist: [
           { id: "search", state: step(Boolean(batch?.batch.closedAt), Boolean(batch && !batch.batch.closedAt)) },
-          { id: "shortlist", state: step(shortlisted, Boolean(batch?.batch.closedAt)) },
+          { id: "shortlist", state: step(carded, Boolean(batch?.batch.closedAt)) },
           { id: "launch", state: step(companies.length > 0) },
           { id: "live", state: step(live) },
           { id: "dollar", state: step(firstDollar, live) },

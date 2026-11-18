@@ -20,6 +20,7 @@ import { createDiscovery, type Discovery } from "./discovery/discovery.ts";
 import { openLocalRegistry } from "./discovery/registry.ts";
 import { openDiscoveryStore } from "./discovery/store.ts";
 import { createDossiers, type Dossiers } from "./dossier/dossiers.ts";
+import { createCards, searchSize, type Cards } from "./dossier/cards.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { EmailAccount } from "../email/store.ts";
 import type { EmailGuard } from "../email/client.ts";
@@ -30,7 +31,7 @@ import { openRails, type Rails } from "./validation/rails.ts";
 import { openSprints, type Sprints } from "./validation/sprints.ts";
 import { openOrders, type Orders } from "./validation/orders.ts";
 import { createRehearsals } from "./validation/rehearsal.ts";
-import { closeIdleCompanies, openSettings, operatorDailyModelCents } from "./settings.ts";
+import { closeIdleCompanies, openSettings, operatorDailyModelCents, startingStakeLimit } from "./settings.ts";
 import { fixtureFetcher } from "./evals/suites.ts";
 import { openApprovals, type Approval, type Approvals } from "./approvals.ts";
 import type { KillReason, SpendCategory } from "../../shared/cofactory/types.ts";
@@ -62,6 +63,8 @@ export interface CofactoryHostDeps {
   createBot?: LauncherDeps["createBot"];
   /** Called once a factory is open with its lead's bot: the lead becomes the chief of staff in place of dusk's helper. */
   factoryOpened?: (leadBotId: string) => void;
+  /** Tells the owner something they would come back for (a card to decide on, a company opened), as a notification. */
+  notifyOwner?: (text: string) => void;
   policy?: Partial<RuntimePolicy>;
   /** When set, outreach is written to this file instead of being sent, so a live run reaches no one. */
   mailDryRunFile?: string;
@@ -86,9 +89,11 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
   let observer: Observer | null = null;
   let discovery: Discovery | null = null;
   let dossiers: Dossiers | null = null;
+  let cards: Cards | null = null;
   let registryClose: (() => void) | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
-  let ticking = false;
+  let ticking: Promise<void> | null = null;
+  let tickAgain = false;
   let recovered: Promise<void> | null = null;
   const log = deps.log ?? ((line: string) => console.log(line));
   const books = (): Book => (book ??= openBook(join(deps.dataDir, "cofactory.db")));
@@ -103,11 +108,78 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     const registry = registryOf();
     registryClose = () => registry.close();
     discovery = createDiscovery({ store: openDiscoveryStore(join(deps.dataDir, "cofactory-discovery.db")), truth: evidence(), registry });
+    const cardsPerBatch = Number(process.env.COFACTORY_CARDS_PER_BATCH);
+    cards = createCards({ store: discovery.store, truth: evidence(), ...(cardsPerBatch > 0 ? { perBatch: cardsPerBatch } : {}),
+      onReady: (card) => deps.notifyOwner?.(`${card.body.name} is ready for you to look at: ${card.body.headline}`) });
     const perBatch = process.env.COFACTORY_DOSSIERS_PER_BATCH;
     dossiers = createDossiers({ store: discovery.store, truth: evidence(), registry, crossFactoryBlock: discovery.policy.crossFactoryBlock, ...(perBatch !== undefined && Number(perBatch) >= 0 ? { policy: { dossiersPerBatch: Number(perBatch) } } : {}) });
     return discovery;
   };
   const dossierService = (): Dossiers => { discoveryService(); return dossiers!; };
+  const cardService = (): Cards => { discoveryService(); return cards!; };
+
+  /** Why the owner cannot start a company from a card right now, or null: the money for its first stake must be there. */
+  const startProblem = (): string | null => {
+    const stake = startingStakeLimit(settings.get());
+    if (stake <= 0) return "fund the factory first";
+    return books().balance("unallocated") < stake ? `the factory has ${books().balance("unallocated")} cents left, and a company starts with ${stake}` : null;
+  };
+
+  function startCard(cardId: string, actor: "owner" | "factory"): { ok: true } | { ok: false; reason: string } {
+    const problem = startProblem();
+    if (problem) return { ok: false, reason: problem };
+    const started = cardService().start(cardId);
+    if (!started.ok) return started;
+    observe().decide({ companyId: null, session: null, actor, kind: "card.start", verdict: "allowed", reason: `${started.card.body.name}: research its full dossier, then launch`, evidence: [{ type: "card", id: cardId }, { type: "niche", id: started.card.nicheId }] });
+    void tick();
+    return { ok: true };
+  }
+
+  /**
+   * Carries started cards to a company: a clean full dossier is championed on the owner's word and launched; one that
+   * did not hold up is marked unconfirmed with no money moved. When nothing is left for the owner to decide, the next
+   * niches get cards, or a new search starts, while the money allows another company.
+   */
+  async function cardUpkeep(): Promise<void> {
+    const deck = cardService(), store = discoveryService().store, launcher = runtimeParts()?.launcher;
+    for (const card of deck.all()) {
+      if (card.status === "ready" && settings.get().approvals.launch === "auto") startCard(card.id, "factory");
+      if (card.status !== "started") continue;
+      const niche = store.niche(card.nicheId)!;
+      const dossier = dossierService().latest(card.nicheId);
+      if (niche.status === "rejected" || dossier?.status === "dropped") {
+        const why = dossier ? [...dossier.verification.criticalFailures, ...dossier.verification.structural, ...(dossier.score?.vetoes.map((item) => item.why) ?? [])].slice(0, 2).join("; ") : "";
+        deck.settle(card.id, { status: "unconfirmed", note: why || "the full research did not hold up" });
+        deps.notifyOwner?.(`${card.body.name} couldn't be confirmed: ${why || "the full research did not hold up"}. No money moved.`);
+        continue;
+      }
+      if (dossier?.status === "scored") {
+        dossierService().champion(dossier.id, "owner", `The owner chose ${card.body.name} from its card ("${card.body.headline}"), and its full dossier verified and scored without a veto.`, niche.signalIds.slice(0, 3));
+      }
+      const current = dossierService().latest(card.nicheId);
+      if (!launcher || (current?.status !== "shortlisted" && current?.status !== "championed")) continue;
+      const problem = startProblem();
+      const launched = problem ? { ok: false as const, reason: problem }
+        : await launcher.launch({ name: card.body.name, brief: card.body.headline, capCents: startingStakeLimit(settings.get()), dossierId: current.id, fromCard: true }, "owner");
+      if (!launched.ok) {
+        if (card.note !== launched.reason) deck.settle(card.id, { note: launched.reason });
+        continue;
+      }
+      deck.settle(card.id, { status: "launched", companyId: launched.company.id, note: null });
+      observe().decide({ companyId: launched.company.id, session: null, actor: "owner", kind: "company.launch", verdict: "allowed", reason: `started from its card: ${card.body.name}`, evidence: [{ type: "company", id: launched.company.id }, { type: "card", id: card.id }] });
+      deps.notifyOwner?.(`${launched.company.name} is open.`);
+    }
+    const waiting = deck.all().some((card) => card.status === "ready" || card.status === "started") || deck.wanted().length > 0;
+    if (waiting || process.env.COFACTORY_NEXT_SEARCH === "0" || !settings.get().onboardedAt || startProblem() || store.openBatch()) return;
+    const last = store.batches().filter((batch) => batch.closedAt !== null).at(-1);
+    if (!last) return;
+    const picked = deck.select(last.id);
+    for (const id of picked) observe().decide({ companyId: null, session: null, actor: "runtime", kind: "niche.card", verdict: "allowed", reason: "picked for a card: nothing was left for the owner to decide", evidence: [{ type: "niche", id }] });
+    if (!picked.length) {
+      const next = discoveryService().startBatch("the factory's next search", searchSize());
+      if (next.ok) log(`cofactory: started the next search (${next.batch.target} niches)`);
+    }
+  }
   let validation: { sprints: Sprints; outreach: Outreach; rails: Rails; orders: Orders; folderOf(companyId: string): string; saveOffer(companyId: string, html: string): string } | null = null;
   const offerFile = (companyId: string) => join(deps.dataDir, "cofactory-companies", companyId, "offer", "index.html");
   const validationParts = () => {
@@ -282,22 +354,33 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       store.raise(null, "daily_ceiling", `today's model use reached the operator's ceiling of $${(ceiling / 100).toFixed(2)}; new sessions start again tomorrow`);
       return "the factory reached today's ceiling on model use";
     } });
-    const scheduler = createScheduler({ book: books(), truth: evidence(), store, sessions, discovery: discoveryService(), dossiers: dossierService() });
+    const scheduler = createScheduler({ book: books(), truth: evidence(), store, sessions, discovery: discoveryService(), dossiers: dossierService(), cards: cardService() });
     const launcher = deps.createBot ? createLauncher({ book: books(), workspaces, createBot: deps.createBot, discovery: { store: discoveryService().store, registry: registryOf() } }) : undefined;
     runtime = { store, sessions, scheduler, launcher, policy };
     return runtime;
   }
 
-  /** One pass of the runtime: zombies swept, alarms checked, and due sessions started. */
-  async function tick(): Promise<void> {
+  /**
+   * A pass of the runtime: zombies swept, alarms checked, and due sessions started. A tick asked for while one runs is
+   * owed one more pass when it ends, since whatever asked (a Start, a payment) may have changed what the pass would do.
+   */
+  function tick(): Promise<void> {
+    if (ticking) { tickAgain = true; return ticking; }
+    ticking = (async () => {
+      do { tickAgain = false; await pass(); } while (tickAgain);
+    })().finally(() => { ticking = null; });
+    return ticking;
+  }
+
+  async function pass(): Promise<void> {
     const parts = runtimeParts();
-    if (!parts || ticking) return;
-    ticking = true;
+    if (!parts) return;
     await recovered;
     try {
       await parts.sessions.sweep();
       for (const alarm of checkAlarms({ book: books(), truth: evidence(), store: parts.store, policy: parts.policy })) log(`cofactory: alarm ${alarm.kind}: ${alarm.detail}`);
       await sprintUpkeep(parts.store);
+      await cardUpkeep();
       bookRevenue();
       closeIdleCompanies({ book: books(), settings: settings.get(), store: parts.store, observe: observe(), approvals: approvals(), armedAt: (companyId) => validationParts().rails.peek(companyId)?.armedAt ?? null, log });
       for (const company of books().companies().filter((candidate) => candidate.status === "live")) {
@@ -319,8 +402,6 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       await parts.scheduler.tick();
     } catch (error) {
       log(`cofactory: runtime tick failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
-    } finally {
-      ticking = false;
     }
   }
 
@@ -331,6 +412,9 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
     observe,
     discovery: discoveryService,
     dossiers: dossierService,
+    cards: cardService,
+    startCard,
+    startProblem,
     validation: validationParts,
     intakeDoor,
     settings,
@@ -398,7 +482,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       const params = (request.params && typeof request.params === "object" ? request.params : {}) as { name?: unknown; arguments?: unknown };
       const parts = runtimeParts();
       const result = await runTool({
-        book: books(), truth: evidence(), seat, actor: `${seat.role}:${ctx.botName}`, observe: observe(), discovery: discoveryService(), dossiers: dossierService(), validation: validationParts(), settings: settings.get, approvals: approvals(),
+        book: books(), truth: evidence(), seat, actor: `${seat.role}:${ctx.botName}`, observe: observe(), discovery: discoveryService(), dossiers: dossierService(), cards: cardService(), validation: validationParts(), settings: settings.get, approvals: approvals(),
         session: parts?.store.liveFor(seat.botId) ?? null,
         ...(parts ? { sessions: parts.sessions } : {}), ...(parts?.launcher ? { launcher: parts.launcher } : {}),
       }, params.name, params.arguments);
@@ -426,6 +510,7 @@ export function createCofactoryHost(deps: CofactoryHostDeps) {
       registryClose?.();
       discovery = null;
       dossiers = null;
+      cards = null;
       validation?.sprints.close();
       validation?.orders.close();
       approvalStore?.close();

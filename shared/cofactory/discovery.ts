@@ -43,8 +43,11 @@ export interface Signal {
   snapshotId: string | null;
 }
 
-/** `selected`: chosen from a closed batch for a dossier. */
-export const NICHE_STATUSES = ["candidate", "selected", "shortlisted", "rejected", "claimed", "released"] as const;
+/**
+ * `card`: chosen from a closed batch for a card the owner picks from. `selected`: the owner started it (or it was picked by
+ * hand), so it gets a full dossier. `passed`: the owner said no to its card.
+ */
+export const NICHE_STATUSES = ["candidate", "card", "selected", "shortlisted", "rejected", "claimed", "released", "passed"] as const;
 export type NicheStatus = (typeof NICHE_STATUSES)[number];
 
 /** One buyer × one job × one channel, resting on signals from independent sources and a factory-unique input. */
@@ -108,3 +111,47 @@ export const DEFAULT_DISCOVERY_POLICY: DiscoveryPolicy = {
   crossFieldShare: 0.2,
   minProfileInputs: 3,
 };
+
+/**
+ * A candidate company as the owner sees it before saying Start: enough to decide on, and every claim on it checked
+ * against its page. Its buyer quotes are the niche's own signals, already checked when they were recorded.
+ */
+export interface CardBody {
+  /** The company's proposed name. */
+  name: string;
+  /** What it sells, to whom, in one line. */
+  headline: string;
+  /** What a buyer pays today for this job, quoted from its page. */
+  priceToday: { url: string; quote: string; amountCents: number; per: "month" | "year" | "job" | "hour"; hoursPerMonth?: number };
+  offer: { priceCents: number; per: "month" | "year" | "job" };
+  rival: { name: string; url: string; whatTheyMiss: string; priceCents: number | null };
+  /** One real buyer who fits, with a page proving they exist. */
+  exampleBuyer: { name: string; url: string };
+  risks: { licensedAdvice: boolean; regulatedClaims: boolean; notes: string };
+}
+
+/**
+ * `ready`: checked and waiting for the owner. `started`: the owner said Start; its full dossier is being researched and
+ * it launches once that is shortlisted. `unconfirmed`: the full research did not hold up, so nothing launched.
+ */
+export const CARD_STATUSES = ["failed", "ready", "started", "passed", "launched", "unconfirmed", "dismissed"] as const;
+export type CardStatus = (typeof CARD_STATUSES)[number];
+
+export interface Card {
+  id: string;
+  nicheId: string;
+  factoryId: string;
+  version: number;
+  at: number;
+  body: CardBody;
+  checks: Array<{ role: "price" | "rival" | "buyer"; url: string; verdict: string; checkId: number | null }>;
+  /** Why a failed card did not hold up; empty for a ready one. */
+  problems: string[];
+  status: CardStatus;
+  decidedAt: number | null;
+  /** The owner's reason for passing, when they gave one. */
+  passReason: string | null;
+  companyId: string | null;
+  /** What happened after Start: why it could not launch yet, or why it was not confirmed. */
+  note: string | null;
+}

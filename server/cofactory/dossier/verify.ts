@@ -54,10 +54,14 @@ const REGULATED_TOPICS: ReadonlyArray<{ topic: string; pattern: RegExp }> = [
  */
 export function undeclaredRisks(body: DossierBody, job: string): string[] {
   if (body.risks.licensedAdvice || body.risks.regulatedClaims) return [];
-  const own = [job, body.gap.why, body.firstTen.steps, ...body.incumbents.map((incumbent) => incumbent.whatTheyMiss)].join("\n");
+  return unexplainedTopics([job, body.gap.why, body.firstTen.steps, ...body.incumbents.map((incumbent) => incumbent.whatTheyMiss)].join("\n"), body.risks.notes);
+}
+
+/** Regulated topics the scout's own words (`own`) name that its risk notes do not take up. */
+export function unexplainedTopics(own: string, notes: string): string[] {
   return REGULATED_TOPICS.flatMap(({ topic, pattern }) => {
     const found = pattern.exec(own);
-    if (!found || pattern.test(body.risks.notes)) return [];
+    if (!found || pattern.test(notes)) return [];
     return [`the work touches ${topic} ("${found[0]}") but the risks neither flag it nor explain in the notes why no licence or regulated claim is involved`];
   });
 }

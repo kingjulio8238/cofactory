@@ -25,6 +25,9 @@ import { ThreadRefsProvider } from "@/components/ThreadRefs";
 import { parseComputerHelp } from "@/lib/computer-control";
 import { Sidebar } from "@/components/Sidebar";
 import { CompanyRail } from "@/components/CompanyRail";
+import { FactoryHome } from "@/components/cofactory/FactoryHome";
+import { useFactoryHomeOpen } from "@/lib/factory-home";
+import { cofactoryEnabled } from "@/lib/feature-flags";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
@@ -297,6 +300,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const settingsOverlay = !botPanelDocks;
   // a reload with the panel open keeps its column from the first frame, not only once the bots arrive
   const panelLoading = state.settingsOpen && !bot && !group && state.hydrated !== true && !remoteClient && !settingsOverlay;
+  const factoryHome = useFactoryHomeOpen() && cofactoryEnabled();
   const framed = windowFramed(capabilities);
   const strips = <>
     <CloudAsleepStrip />
@@ -348,6 +352,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         <CloudEngineSignIn />
       ) : noEngines ? (
         <NoEngines />
+      ) : factoryHome ? (
+        <FactoryHome />
       ) : group ? (
         <GroupView key={group.id} group={group} />
       ) : bot ? (

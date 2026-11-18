@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAmbientAway } from "@/ambient/away";
 import { emailGateDone } from "@/lib/analytics";
+import { factoryHomeOpen } from "@/lib/factory-home";
 import { cofactoryEnabled } from "@/lib/feature-flags";
 import { clearWelcomeDraft } from "@/lib/welcome-draft";
 import { openedFromTheApp } from "@/lib/cloud-welcome";
@@ -79,6 +80,8 @@ export function WelcomeGate({ viewer }: { viewer: WelcomeViewer | null }) {
       onDone={(botId) => {
         setDismissed(true);
         dispatch({ type: "toggleWelcome", open: false });
+        // a factory's first run ends on its Home, the companies to pick from, with no chat or panel over it
+        if (cofactoryEnabled() && factoryHomeOpen()) return;
         // A first run ends in the chat with the bot it chose, else its Chief; the app tour starts only from Settings.
         const target = botId ?? (replay ? null : fallback?.id);
         if (target) dispatch({ type: "select", id: target });

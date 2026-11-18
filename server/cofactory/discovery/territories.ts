@@ -8,8 +8,11 @@ export interface Territory {
   title: string;
 }
 
+/** Census catch-alls ("All Other Legal Services", "Miscellaneous Intermediation") name no industry anyone works in. */
+const CATCH_ALL = /(^|\s)(All )?Other\s|Miscellaneous/;
+
 /** Every industry a factory can be sent into. */
-export const INDUSTRIES: readonly Territory[] = (industries as Array<[string, string]>).map(([code, title]) => ({ code, title }));
+export const INDUSTRIES: readonly Territory[] = (industries as Array<[string, string]>).filter(([, title]) => !CATCH_ALL.test(title)).map(([code, title]) => ({ code, title }));
 
 /** A small deterministic generator, so a factory's draw can be reproduced from its seed. */
 function stream(seed: string): () => number {

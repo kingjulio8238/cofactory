@@ -18,10 +18,11 @@ import type { RuntimeStore } from "../cofactory/runtime/store.ts";
 import type { Truth } from "../cofactory/truth/store.ts";
 import type { Discovery } from "../cofactory/discovery/discovery.ts";
 import type { Dossiers } from "../cofactory/dossier/dossiers.ts";
+import { searchSize, type Cards } from "../cofactory/dossier/cards.ts";
 import type { Rails } from "../cofactory/validation/rails.ts";
 import type { Sprints } from "../cofactory/validation/sprints.ts";
 import type { Orders } from "../cofactory/validation/orders.ts";
-import type { Settings } from "../cofactory/settings.ts";
+import { startingStakeLimit, type Settings } from "../cofactory/settings.ts";
 import { ownerAlarm, seatView } from "../cofactory/seat-view.ts";
 import type { Approval, Approvals } from "../cofactory/approvals.ts";
 import { drawTerritories, territoryCode, territoryText } from "../cofactory/discovery/territories.ts";
@@ -38,6 +39,7 @@ const TRACE = /^\/api\/cofactory\/trace\/(session|company)\/([\w-]+)$/;
 const RAILS = /^\/api\/cofactory\/companies\/([\w-]+)\/rails$/;
 const SEAT = /^\/api\/cofactory\/seat\/([\w-]+)$/;
 const APPROVAL = /^\/api\/cofactory\/approvals\/([\w-]+)$/;
+const CARD = /^\/api\/cofactory\/cards\/([\w-]+)$/;
 const DAY_MS = 24 * 60 * 60_000;
 
 export interface CofactoryRouteDeps {
@@ -47,6 +49,7 @@ export interface CofactoryRouteDeps {
   observe: () => Observer;
   discovery: () => Discovery;
   dossiers: () => Dossiers;
+  cards?: { service: () => Cards; start(cardId: string, actor: "owner"): { ok: true } | { ok: false; reason: string }; startProblem(): string | null };
   validation: () => { sprints: Sprints; rails: Rails; orders: Orders };
   relatedParties?: { get(): { emails: string[]; domains: string[] }; set(value: { emails: string[]; domains: string[] }): void };
   settings?: Settings;
@@ -73,15 +76,13 @@ function lastEvalRun(file: string | undefined): { pass: boolean; at: string; fai
   }
 }
 
-/** The owner's view and controls: deposits, seats, launches, revenue, the kill switch, and the ops board and traces. */
-/** The first search is small, so a new owner sees a launch request the same day; later searches use the full batch. */
-const FIRST_SEARCH_NICHES = 8;
 
 const COUNTRY_NAMES: Record<string, string> = {
   US: "United States", CA: "Canada", GB: "United Kingdom", IE: "Ireland", AU: "Australia", NZ: "New Zealand", DE: "Germany", FR: "France",
   NL: "Netherlands", BE: "Belgium", ES: "Spain", IT: "Italy", IN: "India",
 };
 
+/** The owner's view and controls: deposits, seats, launches, revenue, the kill switch, and the ops board and traces. */
 export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
   const now = deps.now ?? Date.now;
   return async (ctx: RouteContext): Promise<typeof PASS | void> => {
@@ -140,6 +141,23 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
         const { sprints, orders, rails } = deps.validation();
         return json(res, 200, seatView({ botId: seatPath[1]!, book, runtime: runtime?.store ?? null, discovery: deps.discovery(), sprints, orders, rails, settings: deps.settings.get(), approvals: deps.approvals?.store() ?? null, now: now() }));
       }
+      if (path === "/api/cofactory/cards" && deps.cards) {
+        const deck = deps.cards.service(), discovery = deps.discovery();
+        const open = discovery.batchStatus();
+        const shown = deck.all().filter((card) => !["failed", "passed", "dismissed"].includes(card.status));
+        const writing = discovery.store.niches().filter((niche) => niche.status === "card" && !shown.some((card) => card.nicheId === niche.id));
+        const signals = discovery.store.signals();
+        return json(res, 200, {
+          search: open && open.batch.closedAt === null
+            ? { state: "searching", niches: open.niches, target: open.batch.target, signals: open.signals, sites: open.sites }
+            : { state: writing.length ? "writing" : "idle", niches: 0, target: 0, signals: 0, sites: 0 },
+          finds: signals.slice(-4).reverse().map((signal) => ({ quote: signal.quote, site: signal.site, url: signal.url, at: signal.at })),
+          writing: writing.map((niche) => ({ nicheId: niche.id, buyer: niche.buyer, job: niche.job })),
+          cards: shown.map((card) => deck.view(card)),
+          startCents: deps.settings ? startingStakeLimit(deps.settings.get()) : 0,
+          startProblem: deps.cards.startProblem(),
+        });
+      }
       if (path === "/api/cofactory/rail") {
         const approvals = deps.approvals?.store().pending() ?? [];
         const { rails } = deps.validation();
@@ -151,7 +169,7 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
           factory: {
             botIds: members.filter((member) => member.companyId === null).map((member) => member.botId),
             leadBotId: members.find((member) => member.role === "lead")?.botId ?? null,
-            needs: needs(null),
+            needs: needs(null) + (deps.cards?.service().all().filter((card) => card.status === "ready" || card.status === "unconfirmed").length ?? 0),
           },
           companies: book.companies().filter((company) => company.status === "live").map((company) => ({
             id: company.id, name: company.name, stage: company.stage, capCents: company.capCents, availableCents: book.available(company.id),
@@ -242,10 +260,10 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
       const result = deps.discovery().closeBatch();
       record(null, "discovery_close", result.ok ? "closed" : result.reason);
       if (!result.ok) return answer(result);
-      const selected = deps.dossiers().select(result.status.batch.id);
-      for (const id of selected) observe.decide({ companyId: null, session: null, actor: "owner", kind: "niche.select", verdict: "allowed", reason: "selected for a dossier from the closed batch", evidence: [{ type: "niche", id }] });
+      const picked = deps.cards?.service().select(result.status.batch.id) ?? [];
+      for (const id of picked) observe.decide({ companyId: null, session: null, actor: "owner", kind: "niche.card", verdict: "allowed", reason: "picked for a card from the closed batch", evidence: [{ type: "niche", id }] });
       void deps.tick();
-      return json(res, 200, { ...result, selectedForDossiers: selected });
+      return json(res, 200, { ...result, pickedForCards: picked });
     }
     const railsPost = RAILS.exec(path);
     if (railsPost) {
@@ -261,6 +279,26 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
       rails.set(companyId, Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)));
       record(companyId, "rails", Object.keys(input).filter((key) => input[key as keyof typeof input] !== undefined).join(", "));
       return json(res, 200, { ok: true, rails: rails.summary(companyId) });
+    }
+    const cardPath = CARD.exec(path);
+    if (cardPath && deps.cards) {
+      const input = parse(z.object({ decision: z.enum(["start", "pass", "dismiss"]), reason: z.string().trim().max(500).optional() }));
+      if (!input) return;
+      const deck = deps.cards.service(), id = cardPath[1]!;
+      if (input.decision === "start") {
+        const started = deps.cards.start(id, "owner");
+        if (!started.ok) return json(res, 409, { error: started.reason });
+      } else if (input.decision === "pass") {
+        const passed = deck.pass(id, input.reason ?? null);
+        if (!passed.ok) return json(res, 409, { error: passed.reason });
+        observe.decide({ companyId: null, session: null, actor: "owner", kind: "card.pass", verdict: "allowed", reason: `${passed.card.body.name}${passed.card.passReason ? `: ${passed.card.passReason}` : ""}`, evidence: [{ type: "card", id }] });
+        void deps.tick();
+      } else {
+        const dismissed = deck.dismiss(id);
+        if (!dismissed.ok) return json(res, 409, { error: dismissed.reason });
+      }
+      record(null, "card", `${input.decision} ${id.slice(0, 8)}`);
+      return json(res, 200, { ok: true, card: deck.view(deps.discovery().store.card(id)!) });
     }
     const approvalPath = APPROVAL.exec(path);
     if (approvalPath && deps.approvals) {
@@ -335,7 +373,7 @@ export function createCofactoryRoutes(deps: CofactoryRouteDeps) {
       const staffed = await runtime.launcher.staffFactory();
       const lead = staffed.find((seat) => seat.role === "lead");
       if (lead) deps.factoryOpened?.(lead.botId);
-      const batch = settings.onboardedAt || discovery.store.openBatch() ? null : discovery.startBatch("the factory's first search", Number(process.env.COFACTORY_FIRST_SEARCH_NICHES) || FIRST_SEARCH_NICHES);
+      const batch = settings.onboardedAt || discovery.store.openBatch() ? null : discovery.startBatch("the factory's first search", searchSize());
       if (batch?.ok) void deps.tick();
       deps.settings.set({ onboardedAt: settings.onboardedAt ?? now() });
       record(null, "factory_open", `${staffed.length} seats, ${territories.length} territories`);

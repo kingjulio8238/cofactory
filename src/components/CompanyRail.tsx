@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/cn";
 import { cofactoryEnabled } from "@/lib/feature-flags";
+import { openFactoryHome } from "@/lib/factory-home";
 import { inFactoryScope, rememberedScope, setFactoryScope, useFactoryScope } from "@/lib/factory-scope";
 import { api, useStore } from "@/state/store";
 import { BotAvatar } from "./Avatar";
@@ -15,6 +16,7 @@ export interface RailView {
 }
 
 const REFRESH_MS = 10_000;
+let homeShown = false;
 const dollars = (cents: number) => `$${Math.round(cents / 100).toLocaleString("en-US")}`;
 
 export function useRail(enabled: boolean): RailView | null {
@@ -60,6 +62,8 @@ export function CompanyRail() {
     const company = rail.companies.find((candidate) => candidate.id === wanted);
     if (company) setFactoryScope({ kind: "company", companyId: company.id, bots: company.botIds });
     else setFactoryScope({ kind: "factory", companyBots });
+    // until the owner has a company, the window opens on the companies to pick from
+    if (!homeShown && !rail.companies.length) { homeShown = true; openFactoryHome(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rail]);
 
@@ -68,7 +72,7 @@ export function CompanyRail() {
   const show = (target: "factory" | string) => {
     if (target === "factory") {
       setFactoryScope({ kind: "factory", companyBots });
-      if (rail.factory.leadBotId) dispatch({ type: "select", id: rail.factory.leadBotId });
+      openFactoryHome();
       return;
     }
     const company = rail.companies.find((candidate) => candidate.id === target);
@@ -82,7 +86,7 @@ export function CompanyRail() {
   return (
     <nav aria-label="Factory and companies" data-company-rail="" className="hidden w-14 shrink-0 flex-col items-center border-e border-hairline bg-app pt-10 md:flex">
       <ul className="flex w-full flex-col items-center gap-2 pb-3">
-        <RailButton label="Factory" hint="Your lead, your scout and what they found" active={scope.kind === "factory"} needs={rail.factory.needs} onClick={() => show("factory")}>
+        <RailButton label="Factory" hint="The companies your scout found, to start or pass on" active={scope.kind === "factory"} needs={rail.factory.needs} onClick={() => show("factory")}>
           {lead ? <BotAvatar bot={lead} size={34} label="" /> : <span className="text-[18px]">⌂</span>}
         </RailButton>
         {rail.companies.length > 0 && <li role="separator" aria-hidden="true" className="my-1 h-px w-6 bg-hairline" />}

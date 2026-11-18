@@ -39,7 +39,7 @@ export async function startScriptedFactory(dataDir: string, port: number): Promi
   const url = `http://127.0.0.1:${port}`;
   const env = {
     ...verificationServerEnvironment({ FAKE_CLAUDE_MCP_TOOL_ROUTES: routesFile }, dataDir, port), DUSK_NO_TEST_BOTS: "1",
-    COFACTORY_TRUTH_FIXTURES: "1", COFACTORY_FIRST_SEARCH_NICHES: "3", COFACTORY_DOSSIERS_PER_BATCH: "1", COFACTORY_MAIL_DRY_RUN: outbox,
+    COFACTORY_TRUTH_FIXTURES: "1", COFACTORY_FIRST_SEARCH_NICHES: "3", COFACTORY_NEXT_SEARCH: "0", COFACTORY_MAIL_DRY_RUN: outbox,
     COFACTORY_TICK_MS: "400", COFACTORY_CADENCE_MS: "1500", COFACTORY_SHORT_ROUND_MS: "1",
   };
   const child = spawn(process.execPath, verificationServerArgs(env), { env, detached: true, stdio: ["ignore", openSync(logFile, "a"), openSync(logFile, "a")] });
@@ -78,8 +78,26 @@ export function scriptFirstSearch(factory: ScriptedFactory): void {
   ] });
 }
 
-/** After the factory opens: three niches on the scout's signals, a dossier for the one selected, and its shortlisted id. */
-export async function searchToShortlist(factory: ScriptedFactory): Promise<{ signals: string[]; niches: string[]; selected: string; dossierId: string }> {
+/** A card the scripted scout submits for a niche; every claim on it is a fixture page. */
+export const scriptedCard = (nicheId: string, name: string) => tool("cofactory_submit_card", {
+  niche_id: nicheId, name, headline: `${name}: the monthly report one-store pharmacies need, done for them`,
+  price_today: { url: "https://jobs-site.test/jobs", quote: "Budget: $600 per month, fixed price, long term.", amount_cents: 60_000, per: "month" },
+  offer: { price_cents: 15_000, per: "month" },
+  rival: { name: "RemitCheck Enterprise", url: "https://vendor-site.test/pricing", what_they_miss: "sells software to chains of 25+ stores; one-store owners still do the work", price_cents: 4_900 },
+  example_buyer: { name: "Riverside Pharmacy 1", url: "https://buyers-site.test/buyer-1" },
+  risks: { licensed_advice: false, regulated_claims: false, notes: "" },
+});
+
+/** The names the three scripted niches' cards carry, strongest niche first. */
+export const CARD_NAMES = ["Riverside Recon", "Appeal Desk", "Binder Keep"] as const;
+
+export interface ShownCard { card: { id: string; nicheId: string; status: string; body: { name: string } } }
+
+/**
+ * After the factory opens: three niches on the scout's signals, the search closed, and a card for each; each niche's
+ * full dossier is scripted too, for whichever the owner starts. Resolves once all three cards are ready.
+ */
+export async function searchToCards(factory: ScriptedFactory): Promise<{ niches: string[]; cards: Record<string, ShownCard["card"]> }> {
   const { call, until, routes } = factory;
   const signals = await until("four signals", async () => {
     const found = (await call("GET", "/api/cofactory/discovery")).signals as Array<{ id: string }>;
@@ -100,28 +118,28 @@ export async function searchToShortlist(factory: ScriptedFactory): Promise<{ sig
     const found = (await call("GET", "/api/cofactory/discovery")).niches as Array<{ id: string }>;
     return found.length >= 3 ? found.map((item) => item.id) : null;
   });
-  // every niche's dossier is scripted before the batch closes, so whichever is selected finds its research ready
+  // every niche's card and full dossier are scripted before the search closes, so each finds its research ready
   routes({
-    ...Object.fromEntries(niches.map((id) => [`niche_id ${id}`, [tool("cofactory_submit_dossier", { niche_id: id, dossier: goodDossier() }), ...ending("submitted the dossier")]])),
-    "Factory scout ·": [tool("cofactory_close_batch"), ...ending("closed the batch")],
+    ...Object.fromEntries(niches.flatMap((id, index) => [
+      [`cofactory_submit_card (niche_id ${id})`, [scriptedCard(id, CARD_NAMES[index]!), ...ending("submitted the card")]],
+      [`cofactory_submit_dossier (niche_id ${id})`, [tool("cofactory_submit_dossier", { niche_id: id, dossier: goodDossier() }), ...ending("submitted the dossier")]],
+    ])),
+    "Factory scout ·": [tool("cofactory_close_batch"), ...ending("closed the search")],
   });
-  const selected = await until("a niche selected for a dossier", async () => {
-    const entries = (await call("GET", "/api/cofactory/dossiers")).niches as Array<{ niche: { id: string; status: string } }>;
-    return entries.find((entry) => entry.niche.status === "selected" || entry.niche.status === "shortlisted")?.niche.id;
+  const shown = await until("three ready cards", async () => {
+    const cards = (await call("GET", "/api/cofactory/cards")).cards as ShownCard[];
+    return cards.filter((entry) => entry.card.status === "ready").length >= 3 ? cards : null;
   });
-  const dossierId = await until("a shortlisted dossier", async () => {
-    const board = (await call("GET", "/api/cofactory/dossiers")).niches as Array<{ niche: { id: string }; dossier: { id: string; status: string } | null }>;
-    const latest = board.find((entry) => entry.niche.id === selected)?.dossier;
-    return latest?.status === "shortlisted" ? latest.id : null;
-  });
-  routes({});
-  return { signals, niches, selected, dossierId };
+  return { niches, cards: Object.fromEntries(shown.map((entry) => [entry.card.body.name, entry.card])) };
 }
 
-/** The lead asks the owner to launch Riverside Recon from the dossier; resolves with the pending approval. */
-export async function askToLaunch(factory: ScriptedFactory, dossierId: string): Promise<{ id: string; title: string }> {
-  factory.routes({ "Factory lead ·": [tool("cofactory_launch_company", { name: "Riverside Recon", cap_cents: 5_000, dossier_id: dossierId }), ...ending("asked the owner to launch Riverside Recon")] });
-  const approval = await factory.until("the launch request", async () => (await factory.call("GET", "/api/cofactory/approvals")).approvals?.find((item: { kind: string }) => item.kind === "launch"));
-  factory.routes({});
-  return approval;
+/** The owner's Start on a card; resolves with the company once its full dossier holds up and it launches. */
+export async function startFromCard(factory: ScriptedFactory, cardId: string): Promise<{ id: string; name: string; brief: string }> {
+  const started = await factory.call("POST", `/api/cofactory/cards/${cardId}`, { decision: "start" });
+  if (!started.ok) throw new Error(`Start was refused: ${started.error}`);
+  return factory.until("the company to launch", async () => {
+    const card = ((await factory.call("GET", "/api/cofactory/cards")).cards as ShownCard[]).find((entry) => entry.card.id === cardId)?.card as { companyId?: string } | undefined;
+    if (!card?.companyId) return null;
+    return ((await factory.call("GET", "/api/cofactory/state")).companies as Array<{ id: string; name: string; brief: string }>).find((company) => company.id === card.companyId);
+  });
 }

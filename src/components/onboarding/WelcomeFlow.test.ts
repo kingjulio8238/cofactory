@@ -7,6 +7,7 @@ import { act, createElement, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { introStaged, stageIntro } from "@/lib/default-bot";
+import { factoryHomeOpen as factoryHomeShown } from "@/lib/factory-home";
 import { setLocale } from "@/lib/i18n";
 import { EMPTY_ONBOARDING, MET_CHIEF_HINT, WELCOME_VERSION } from "@/lib/onboarding";
 import type { InstanceInfo } from "@/state/store";
@@ -751,8 +752,9 @@ describe("the Cofactory first run", () => {
     expect(title()).toBe("Your factory is open");
     expect(document.body.querySelector("[data-opening-territories]")?.textContent).toBe("Roofing ContractorsFuneral Homes and Funeral ServicesDental LaboratoriesPlus 1 more");
     expect(posted("/api/cofactory/factory/open")).toHaveLength(1);
-    await press("Meet your scout");
-    expect(f.onDone).toHaveBeenCalledExactlyOnceWith("scout-1");
+    await press("See your first companies");
+    expect(f.onDone, "the first run ends on the companies to pick, not a chat").toHaveBeenCalledExactlyOnceWith(null);
+    expect(factoryHomeShown()).toBe(true);
   });
 
   it("keeps a hunch and a hard no when the owner gives them", async () => {

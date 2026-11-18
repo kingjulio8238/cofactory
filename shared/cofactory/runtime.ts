@@ -81,6 +81,8 @@ export interface RuntimePolicy {
   discoverySessionsPerBatch: number;
   /** Deep sessions one niche's dossier may take; after that the niche is rejected (kill fast, ignore sunk cost). */
   dossierSessionsPerNiche: number;
+  /** Scout sessions a niche gets to write a card that holds up before it is dropped. */
+  cardSessionsPerNiche: number;
 }
 
 export const DEFAULT_RUNTIME_POLICY: RuntimePolicy = {
@@ -98,4 +100,5 @@ export const DEFAULT_RUNTIME_POLICY: RuntimePolicy = {
   zombieGraceMs: 15 * 60_000,
   discoverySessionsPerBatch: 4,
   dossierSessionsPerNiche: 2,
+  cardSessionsPerNiche: 2,
 };

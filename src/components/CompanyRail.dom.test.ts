@@ -19,6 +19,7 @@ vi.mock("@/state/store", () => ({
 vi.stubEnv("VITE_COFACTORY", "");
 const { CompanyRail } = await import("./CompanyRail");
 const { factoryScope } = await import("@/lib/factory-scope");
+const { factoryHomeOpen } = await import("@/lib/factory-home");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 afterEach(() => { document.body.innerHTML = ""; f.dispatch.mockReset(); });
@@ -38,5 +39,10 @@ describe("the company rail", () => {
     expect(factoryScope()).toEqual({ kind: "company", companyId: "a", bots: ["ceo-a", "builder-a"] });
     expect(f.dispatch).toHaveBeenCalledWith({ type: "select", id: "ceo-a" });
     expect(items[1]!.getAttribute("aria-current")).toBe("page");
+
+    f.dispatch.mockReset();
+    await act(async () => { items[0]!.click(); });
+    expect(factoryHomeOpen(), "the factory is its Home, the companies to pick from").toBe(true);
+    expect(f.dispatch, "not the lead's chat").not.toHaveBeenCalled();
   });
 });
